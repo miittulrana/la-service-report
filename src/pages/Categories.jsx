@@ -1,0 +1,391 @@
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
+import { getDamageAlertStatus, formatCcType } from '../lib/utils';
+import { AlertCircle, Plus, X, Trash2 } from 'lucide-react';
+
+function Categories() {
+  const navigate = useNavigate();
+  const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState(null);
+  const [selectedCategoryName, setSelectedCategoryName] = useState('');
+  const [newScooterId, setNewScooterId] = useState('');
+  const [newScooterCcType, setNewScooterCcType] = useState('125cc');
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [scooterToDelete, setScooterToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  useEffect(() => {
+    fetchCategories();
+  }, []);
+
+  async function fetchCategories() {
+    try {
+      setLoading(true);
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('categories')
+        .select('*')
+        .order('name');
+
+      if (categoriesError) throw categoriesError;
+
+      for (let category of categoriesData) {
+        const { data: scooters, error: scootersError } = await supabase
+          .from('scooters')
+          .select(`
+            *,
+            services(
+              id,
+              current_km,
+              next_km,
+              service_date
+            ),
+            damages(*)
+          `)
+          .eq('category_id', category.id)
+          .order('id');
+
+        if (scootersError) throw scootersError;
+        category.scooters = scooters;
+      }
+
+      setCategories(categoriesData);
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error fetching categories');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleAddScooter = async (e) => {
+    e.preventDefault();
+    try {
+      const { data: existingScooter } = await supabase
+        .from('scooters')
+        .select('id')
+        .eq('id', newScooterId)
+        .single();
+
+      if (existingScooter) {
+        alert('A scooter with this ID already exists');
+        return;
+      }
+
+      // Set CC type based on category type
+      let ccType = newScooterCcType;
+      if (selectedCategoryName === 'Bolt') {
+        ccType = '125cc BOLT';
+      }
+
+      const { error } = await supabase
+        .from('scooters')
+        .insert([{
+          id: newScooterId,
+          category_id: selectedCategory,
+          status: 'active',
+          cc_type: ccType
+        }]);
+
+      if (error) throw error;
+
+      setNewScooterId('');
+      setNewScooterCcType('125cc');
+      setShowAddModal(false);
+      setSelectedCategory(null);
+      setSelectedCategoryName('');
+      fetchCategories();
+    } catch (error) {
+      console.error('Error adding scooter:', error);
+      alert('Error adding scooter');
+    }
+  };
+
+  const handleDeleteClick = (e, scooter) => {
+    e.stopPropagation();
+    setScooterToDelete(scooter);
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!scooterToDelete) return;
+
+    try {
+      setIsDeleting(true);
+
+      await Promise.all([
+        supabase
+          .from('services')
+          .delete()
+          .eq('scooter_id', scooterToDelete.id),
+        supabase
+          .from('damages')
+          .delete()
+          .eq('scooter_id', scooterToDelete.id)
+      ]);
+
+      const { error } = await supabase
+        .from('scooters')
+        .delete()
+        .eq('id', scooterToDelete.id);
+
+      if (error) throw error;
+
+      setShowDeleteModal(false);
+      setScooterToDelete(null);
+      fetchCategories();
+    } catch (error) {
+      console.error('Error deleting scooter:', error);
+      alert('Error deleting scooter');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-32">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="py-4 max-w-7xl mx-auto px-4">
+      {/* Search Bar */}
+      <div className="sticky top-16 bg-gray-50 py-4 z-10">
+        <input
+          type="search"
+          placeholder="Search any scooter..."
+          className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+
+      {/* Categories Grid */}
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {categories.map(category => (
+          <div key={category.id} className="bg-white rounded-lg shadow-sm p-6">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold">{category.name}</h2>
+              <button
+                onClick={() => {
+                  setSelectedCategory(category.id);
+                  setSelectedCategoryName(category.name);
+                  setShowAddModal(true);
+                }}
+                className="bg-blue-500 text-white text-sm font-medium whitespace-nowrap
+                         md:px-3 md:py-1.5 px-10 py-2.5 rounded-lg hover:bg-blue-600"
+              >
+                Add Scooter
+              </button>
+            </div>
+            
+            {/* Scooters Stack */}
+            <div className="space-y-4">
+              {category.scooters?.map(scooter => {
+                const damageStatus = getDamageAlertStatus(scooter.damages);
+                
+                return (
+                  <div
+                    key={scooter.id}
+                    onClick={() => navigate(`/scooters/${scooter.id}`)}
+                    className={`flex items-center justify-between p-4 
+                             bg-gray-50 rounded-lg hover:shadow-md 
+                             transition-all duration-300 cursor-pointer 
+                             border ${damageStatus.hasDamage ? damageStatus.style : 'border-gray-100'}`}
+                  >
+                    <div className="flex flex-col">
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg font-semibold">{scooter.id}</span>
+                        <span className="text-sm text-gray-500">
+                          ({formatCcType(scooter.cc_type)})
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2 mt-1">
+                        {scooter.status === 'active' ? (
+                          <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-sm">
+                            Active
+                          </span>
+                        ) : (
+                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-sm">
+                            Inactive
+                          </span>
+                        )}
+                        {damageStatus.hasDamage && (
+                          <span className="flex items-center gap-1 px-2 py-1 rounded-full text-sm 
+                                       bg-red-100 text-red-700">
+                            <AlertCircle className="h-4 w-4" />
+                            {damageStatus.text}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      onClick={(e) => handleDeleteClick(e, scooter)}
+                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 
+                               rounded-lg transition-colors"
+                    >
+                      <Trash2 className="h-5 w-5" />
+                    </button>
+                  </div>
+                );
+              })}
+
+              {(!category.scooters || category.scooters.length === 0) && (
+                <p className="text-gray-500 text-center py-4">
+                  No scooters found
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Add Scooter Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">
+                Add New Scooter 
+                {selectedCategoryName && ` - ${selectedCategoryName}`}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setSelectedCategory(null);
+                  setSelectedCategoryName('');
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddScooter} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Scooter ID</label>
+                <input
+                  type="text"
+                  required
+                  className="w-full p-2 border rounded"
+                  value={newScooterId}
+                  onChange={(e) => setNewScooterId(e.target.value.toUpperCase())}
+                  placeholder="Enter scooter ID"
+                />
+              </div>
+
+              {selectedCategoryName !== 'Bolt' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Engine Type</label>
+                  <select
+                    value={newScooterCcType}
+                    onChange={(e) => setNewScooterCcType(e.target.value)}
+                    className="w-full p-2 border rounded"
+                    required
+                  >
+                    <option value="125cc">125cc (4000km service interval)</option>
+                    <option value="50cc">50cc (2500km service interval)</option>
+                  </select>
+                </div>
+              )}
+
+              {selectedCategoryName === 'Bolt' && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-600">
+                    Bolt scooters are automatically set to 125cc BOLT type with 3000km service interval
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setSelectedCategory(null);
+                    setSelectedCategoryName('');
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Add Scooter
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Delete Scooter</h2>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setScooterToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-600">
+                Are you sure you want to delete scooter {scooterToDelete?.id}? This will also delete all service records and damage reports. This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setScooterToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 
+                         disabled:opacity-50 flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    <span>Delete Scooter</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default Categories;
