@@ -4,7 +4,9 @@ import { supabase } from '../lib/supabase';
 import { ArrowLeft, AlertCircle, Trash2 } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
-import { calculateNextServiceKm, formatCcType } from '../lib/utils';
+import { calculateNextServiceKm, formatCcType, formatWhatsAppDate } from '../lib/utils';
+import { sendServiceNotification } from '../lib/messagebird';
+import { useApiCache, useDebounce } from '../lib/performance';
 import ExcelImport from '../components/ui/ExcelImport';
 import { Modal } from '../components/ui/Modal';
 import "react-datepicker/dist/react-datepicker.css";
@@ -28,9 +30,22 @@ function ScooterDetails() {
     service_date: new Date().toISOString().split('T')[0]
   });
 
+  // Use API cache for fetching details
+  const { getCachedData, setCachedData } = useApiCache(`scooter-${id}`);
+
   const fetchScooterDetails = useCallback(async () => {
     try {
       setLoading(true);
+
+      // Check cache first
+      const cachedData = getCachedData();
+      if (cachedData) {
+        setScooter(cachedData.scooter);
+        setServices(cachedData.services);
+        setLoading(false);
+        return;
+      }
+
       const [scooterResponse, servicesResponse] = await Promise.all([
         supabase
           .from('scooters')
@@ -47,6 +62,12 @@ function ScooterDetails() {
       if (scooterResponse.error) throw scooterResponse.error;
       if (servicesResponse.error) throw servicesResponse.error;
 
+      // Cache the results
+      setCachedData({
+        scooter: scooterResponse.data,
+        services: servicesResponse.data || []
+      });
+
       setScooter(scooterResponse.data);
       setServices(servicesResponse.data || []);
     } catch (error) {
@@ -54,12 +75,62 @@ function ScooterDetails() {
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, getCachedData, setCachedData]);
 
   useEffect(() => {
     fetchScooterDetails();
   }, [fetchScooterDetails]);
 
+  const handleAddService = async (e) => {
+    e.preventDefault();
+    try {
+      const currentKm = parseInt(newService.current_km);
+      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
+
+      // Add service record to database
+      const { error } = await supabase
+        .from('services')
+        .insert([{
+          scooter_id: id,
+          service_date: newService.service_date,
+          current_km: currentKm,
+          next_km: nextKm,
+          service_details: newService.service_details
+        }]);
+
+      if (error) throw error;
+
+      // Update scooter status
+      await supabase
+        .from('scooters')
+        .update({ status: 'active' })
+        .eq('id', id);
+
+      // Send WhatsApp notification in background
+      try {
+        await sendServiceNotification({
+          date: formatWhatsAppDate(newService.service_date),
+          scooterId: scooter.id,
+          currentKm: currentKm,
+          nextKm: nextKm,
+          category: scooter.category?.name
+        });
+      } catch (notificationError) {
+        console.error('WhatsApp notification error:', notificationError);
+      }
+
+      setNewService({
+        current_km: '',
+        service_details: '',
+        service_date: new Date().toISOString().split('T')[0]
+      });
+      setShowAddService(false);
+      fetchScooterDetails();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error adding service');
+    }
+  };
   const toggleStatus = async () => {
     try {
       setUpdating(true);
@@ -114,41 +185,6 @@ function ScooterDetails() {
       setIsDeleting(false);
     }
   };
-  async function handleAddService(e) {
-    e.preventDefault();
-    try {
-      const currentKm = parseInt(newService.current_km);
-      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
-
-      const { error } = await supabase
-        .from('services')
-        .insert([{
-          scooter_id: id,
-          service_date: newService.service_date,
-          current_km: currentKm,
-          next_km: nextKm,
-          service_details: newService.service_details
-        }]);
-
-      if (error) throw error;
-
-      await supabase
-        .from('scooters')
-        .update({ status: 'active' })
-        .eq('id', id);
-
-      setNewService({
-        current_km: '',
-        service_details: '',
-        service_date: new Date().toISOString().split('T')[0]
-      });
-      setShowAddService(false);
-      fetchScooterDetails();
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error adding service');
-    }
-  }
 
   if (loading) {
     return (
@@ -261,9 +297,6 @@ function ScooterDetails() {
                   </p>
                   <p className="text-gray-600 mt-1">
                     {service.current_km.toLocaleString()} km → {service.next_km.toLocaleString()} km
-                    <span className="text-sm ml-2">
-                      ({scooter.cc_type})
-                    </span>
                   </p>
                 </div>
                 <button
@@ -300,6 +333,11 @@ function ScooterDetails() {
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-gray-200">
               <h2 className="text-xl font-bold">Add Service for {scooter.id}</h2>
+              {scooter.category?.name.toLowerCase() === 'bolt' && (
+                <p className="text-sm text-gray-600 mt-1">
+                  WhatsApp notification will be sent to both primary and Bolt numbers
+                </p>
+              )}
             </div>
             
             <form onSubmit={handleAddService} className="p-6 space-y-4">

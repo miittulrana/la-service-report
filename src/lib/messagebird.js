@@ -1,6 +1,6 @@
 import messagebird from 'messagebird';
 
-// Configuration - Replace these with your actual values after approval
+// Configuration
 const config = {
     apiKey: 'YOUR_API_KEY',
     channelId: 'YOUR_CHANNEL_ID',
@@ -12,13 +12,36 @@ const config = {
     }
 };
 
-// Initialize MessageBird client
+// Initialize MessageBird client with request queue
 const messagebirdClient = messagebird(config.apiKey);
+const messageQueue = [];
+let isProcessingQueue = false;
 
 /**
- * Creates WhatsApp message parameters with template variables
+ * Process message queue in background
  */
-const createWhatsAppMessage = ({date, scooterId, currentKm, nextKm}) => ({
+const processMessageQueue = async () => {
+    if (isProcessingQueue || messageQueue.length === 0) return;
+    
+    isProcessingQueue = true;
+    
+    while (messageQueue.length > 0) {
+        const message = messageQueue.shift();
+        try {
+            await messagebirdClient.conversations.send(message);
+            await new Promise(resolve => setTimeout(resolve, 100)); // Delay between messages
+        } catch (error) {
+            console.error('Failed to send message:', error);
+        }
+    }
+    
+    isProcessingQueue = false;
+};
+
+/**
+ * Creates WhatsApp message parameters
+ */
+const createMessageParams = ({date, scooterId, currentKm, nextKm}) => ({
     channelId: config.channelId,
     type: 'hsm',
     content: {
@@ -43,30 +66,22 @@ const createWhatsAppMessage = ({date, scooterId, currentKm, nextKm}) => ({
 });
 
 /**
- * Sends a single WhatsApp message
+ * Queue a message for sending
  */
-const sendMessage = async (messageParams, toNumber) => {
-    try {
-        await messagebirdClient.conversations.send({
-            ...messageParams,
-            to: toNumber
-        });
-        return true;
-    } catch (error) {
-        console.error(`Failed to send WhatsApp message to ${toNumber}:`, error);
-        return false;
+const queueMessage = (messageParams, toNumber) => {
+    messageQueue.push({
+        ...messageParams,
+        to: toNumber
+    });
+    
+    // Start processing queue if not already processing
+    if (!isProcessingQueue) {
+        setTimeout(processMessageQueue, 0);
     }
 };
 
 /**
  * Main function to send service notifications
- * @param {Object} params
- * @param {string} params.date - Service date
- * @param {string} params.scooterId - Scooter ID
- * @param {number} params.currentKm - Current kilometer reading
- * @param {number} params.nextKm - Next service kilometer reading
- * @param {string} params.category - Category name ('Bolt', 'Regular', etc)
- * @returns {Promise<boolean>} Success status
  */
 export const sendServiceNotification = async ({
     date,
@@ -76,51 +91,30 @@ export const sendServiceNotification = async ({
     category
 }) => {
     try {
-        const messageParams = createWhatsAppMessage({
+        const messageParams = createMessageParams({
             date,
             scooterId,
             currentKm,
             nextKm
         });
 
-        // Always send to primary number for ALL services
-        await sendMessage(messageParams, config.numbers.primary);
+        // Queue message to primary number (for ALL services)
+        queueMessage(messageParams, config.numbers.primary);
 
-        // If it's a Bolt scooter, send additional notification to Bolt number
+        // If it's a Bolt scooter, queue additional notification
         if (category?.toLowerCase() === 'bolt') {
-            await sendMessage(messageParams, config.numbers.bolt);
+            queueMessage(messageParams, config.numbers.bolt);
         }
 
-        console.log('Service notification sent successfully');
         return true;
-
     } catch (error) {
         console.error('Error in sendServiceNotification:', error);
         return false;
     }
 };
 
-// Example usage in your handleAddService:
-/*
-import { sendServiceNotification } from '../lib/messagebird';
-
-const handleAddService = async (e) => {
-    e.preventDefault();
-    try {
-        // Your existing service addition code...
-
-        // Send WhatsApp notification
-        await sendServiceNotification({
-            date: newService.service_date,
-            scooterId: scooter.id,
-            currentKm: parseInt(newService.current_km),
-            nextKm: nextServiceKm,
-            category: scooter.category?.name
-        });
-
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Error adding service');
-    }
+// Export for testing purposes
+export const __testing__ = {
+    getQueueLength: () => messageQueue.length,
+    clearQueue: () => messageQueue.length = 0
 };
-*/

@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getDamageAlertStatus, formatCcType } from '../lib/utils';
 import { AlertCircle, Plus, X, Trash2 } from 'lucide-react';
+import { useApiCache, useDebounce } from '../lib/performance';
 
 function Categories() {
   const navigate = useNavigate();
@@ -18,11 +19,7 @@ function Categories() {
   const [scooterToDelete, setScooterToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  useEffect(() => {
-    fetchCategories();
-  }, []);
-
-  async function fetchCategories() {
+  const fetchCategories = useCallback(async () => {
     try {
       setLoading(true);
       const { data: categoriesData, error: categoriesError } = await supabase
@@ -32,8 +29,8 @@ function Categories() {
 
       if (categoriesError) throw categoriesError;
 
-      for (let category of categoriesData) {
-        const { data: scooters, error: scootersError } = await supabase
+      const scooterPromises = categoriesData.map(category =>
+        supabase
           .from('scooters')
           .select(`
             *,
@@ -46,11 +43,16 @@ function Categories() {
             damages(*)
           `)
           .eq('category_id', category.id)
-          .order('id');
+          .order('id')
+      );
 
-        if (scootersError) throw scootersError;
-        category.scooters = scooters;
-      }
+      const scooterResults = await Promise.all(scooterPromises);
+      
+      categoriesData.forEach((category, index) => {
+        if (!scooterResults[index].error) {
+          category.scooters = scooterResults[index].data;
+        }
+      });
 
       setCategories(categoriesData);
     } catch (error) {
@@ -59,7 +61,11 @@ function Categories() {
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
 
   const handleAddScooter = async (e) => {
     e.preventDefault();
@@ -75,7 +81,6 @@ function Categories() {
         return;
       }
 
-      // Set CC type based on category type
       let ccType = newScooterCcType;
       if (selectedCategoryName === 'Bolt') {
         ccType = '125cc BOLT';
@@ -112,7 +117,7 @@ function Categories() {
 
   const handleDeleteConfirm = async () => {
     if (!scooterToDelete) return;
-
+    
     try {
       setIsDeleting(true);
 
@@ -145,6 +150,21 @@ function Categories() {
     }
   };
 
+  // Memoized filtered scooters for each category
+  const filteredCategories = useMemo(() => {
+    return categories.map(category => ({
+      ...category,
+      scooters: category.scooters?.filter(scooter =>
+        scooter.id.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    }));
+  }, [categories, searchTerm]);
+
+  // Debounced search
+  const debouncedSetSearchTerm = useDebounce((value) => {
+    setSearchTerm(value);
+  }, 300);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-32">
@@ -161,14 +181,14 @@ function Categories() {
           type="search"
           placeholder="Search any scooter..."
           className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => debouncedSetSearchTerm(e.target.value)}
+          defaultValue={searchTerm}
         />
       </div>
 
       {/* Categories Grid */}
       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {categories.map(category => (
+        {filteredCategories.map(category => (
           <div key={category.id} className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold">{category.name}</h2>
@@ -374,7 +394,7 @@ function Categories() {
                     <span>Deleting...</span>
                   </>
                 ) : (
-                  <>
+<>
                     <Trash2 className="h-4 w-4" />
                     <span>Delete Scooter</span>
                   </>
