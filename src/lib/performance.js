@@ -1,5 +1,3 @@
-// src/lib/performance.js
-
 import { useCallback, useEffect, useRef } from 'react';
 
 // Cache for API responses

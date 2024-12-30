@@ -2,11 +2,12 @@ import messagebird from 'messagebird';
 
 // Configuration
 const config = {
-    apiKey: 'YOUR_API_KEY',
-    channelId: 'YOUR_CHANNEL_ID',
-    namespace: 'YOUR_NAMESPACE',
-    templateName: 'service_update',
+    apiKey: 'fd8275d6-25cf-4437-982a-23b87bf76a3d',
+    channelId: '472631b5-19e3-5825-96ae-0647959b8f97',
+    namespace: '1cd17d45-f759-4981-8af7-60d8f6ec8d85',
+    templateName: 'LA Rentals Service Update',
     numbers: {
+        from: '+15557105010',      // Business number sending messages
         primary: '+35677106319',   // Primary number - gets ALL notifications
         bolt: '+35699110797'       // Bolt number - gets only Bolt notifications
     }
@@ -28,7 +29,10 @@ const processMessageQueue = async () => {
     while (messageQueue.length > 0) {
         const message = messageQueue.shift();
         try {
-            await messagebirdClient.conversations.send(message);
+            await messagebirdClient.conversations.send({
+                ...message,
+                from: config.numbers.from  // Add the from number
+            });
             await new Promise(resolve => setTimeout(resolve, 100)); // Delay between messages
         } catch (error) {
             console.error('Failed to send message:', error);

@@ -2,8 +2,10 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getDamageAlertStatus, formatCcType } from '../lib/utils';
-import { AlertCircle, Plus, X, Trash2 } from 'lucide-react';
+import { AlertCircle, Plus, X, Trash2, FileDown } from 'lucide-react';
 import { useApiCache, useDebounce } from '../lib/performance';
+import DateRangePicker from '../components/ui/DateRangePicker';
+import { generateServiceReport } from '../lib/pdfUtils';
 
 function Categories() {
   const navigate = useNavigate();
@@ -18,6 +20,11 @@ function Categories() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [scooterToDelete, setScooterToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // New states for export functionality
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [exportingCategory, setExportingCategory] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -67,6 +74,46 @@ function Categories() {
     fetchCategories();
   }, [fetchCategories]);
 
+  // Export handler
+  const handleExport = async (startDate, endDate) => {
+    if (!exportingCategory) return;
+    
+    try {
+      setIsExporting(true);
+      
+      // Fetch services for the selected category within date range
+      const { data: services, error } = await supabase
+        .from('services')
+        .select(`
+          *,
+          scooter:scooters(
+            id,
+            category:categories(name)
+          )
+        `)
+        .gte('service_date', startDate)
+        .lte('service_date', endDate)
+        .filter('scooter.category_id', 'eq', exportingCategory.id)
+        .order('service_date', { ascending: false });
+
+      if (error) throw error;
+
+      // Generate and download PDF
+      await generateServiceReport({
+        categoryName: exportingCategory.name,
+        dateRange: { startDate, endDate },
+        services: services,
+      });
+
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('Error exporting service history');
+    } finally {
+      setIsExporting(false);
+      setShowDatePicker(false);
+      setExportingCategory(null);
+    }
+  };
   const handleAddScooter = async (e) => {
     e.preventDefault();
     try {
@@ -191,7 +238,21 @@ function Categories() {
         {filteredCategories.map(category => (
           <div key={category.id} className="bg-white rounded-lg shadow-sm p-6">
             <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-bold">{category.name}</h2>
+              <h2 className="text-xl font-bold flex items-center gap-3">
+                {category.name}
+                {/* Export Button */}
+                <button
+                  onClick={() => {
+                    setExportingCategory(category);
+                    setShowDatePicker(true);
+                  }}
+                  className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50
+                           rounded-lg transition-colors"
+                  title="Export Service History"
+                >
+                  <FileDown className="h-5 w-5" />
+                </button>
+              </h2>
               <button
                 onClick={() => {
                   setSelectedCategory(category.id);
@@ -265,6 +326,20 @@ function Categories() {
           </div>
         ))}
       </div>
+
+      {/* Date Range Picker Modal for Export */}
+      {showDatePicker && (
+        <DateRangePicker
+          isOpen={showDatePicker}
+          onClose={() => {
+            setShowDatePicker(false);
+            setExportingCategory(null);
+          }}
+          onExport={handleExport}
+          isLoading={isExporting}
+          categoryName={exportingCategory?.name}
+        />
+      )}
 
       {/* Add Scooter Modal */}
       {showAddModal && (
@@ -394,7 +469,7 @@ function Categories() {
                     <span>Deleting...</span>
                   </>
                 ) : (
-<>
+                  <>
                     <Trash2 className="h-4 w-4" />
                     <span>Delete Scooter</span>
                   </>
