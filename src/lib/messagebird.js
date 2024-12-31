@@ -2,12 +2,11 @@ import messagebird from 'messagebird';
 
 // Configuration
 const config = {
-    apiKey: 'fd8275d6-25cf-4437-982a-23b87bf76a3d',
-    channelId: '472631b5-19e3-5825-96ae-0647959b8f97',
+    apiKey: 'ZtmGp69YV8Nlr5Etr6Ji9RXPtyMrIdaRnvvL',
+    channelId: 'f452b037-09c6-5838-9f3f-d8fd5342cae7',
     namespace: '1cd17d45-f759-4981-8af7-60d8f6ec8d85',
     templateName: 'LA Rentals Service Update',
     numbers: {
-        from: '+15557105010',      // Business number sending messages
         primary: '+35677106319',   // Primary number - gets ALL notifications
         bolt: '+35699110797'       // Bolt number - gets only Bolt notifications
     }
@@ -23,22 +22,19 @@ let isProcessingQueue = false;
  */
 const processMessageQueue = async () => {
     if (isProcessingQueue || messageQueue.length === 0) return;
-    
+
     isProcessingQueue = true;
-    
+
     while (messageQueue.length > 0) {
         const message = messageQueue.shift();
         try {
-            await messagebirdClient.conversations.send({
-                ...message,
-                from: config.numbers.from  // Add the from number
-            });
+            await messagebirdClient.conversations.send(message);
             await new Promise(resolve => setTimeout(resolve, 100)); // Delay between messages
         } catch (error) {
             console.error('Failed to send message:', error);
         }
     }
-    
+
     isProcessingQueue = false;
 };
 
@@ -77,7 +73,7 @@ const queueMessage = (messageParams, toNumber) => {
         ...messageParams,
         to: toNumber
     });
-    
+
     // Start processing queue if not already processing
     if (!isProcessingQueue) {
         setTimeout(processMessageQueue, 0);
@@ -118,7 +114,7 @@ export const sendServiceNotification = async ({
 };
 
 // Export for testing purposes
-export const __testing__ = {
+export const testing = {
     getQueueLength: () => messageQueue.length,
     clearQueue: () => messageQueue.length = 0
 };

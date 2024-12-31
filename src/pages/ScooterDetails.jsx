@@ -1,93 +1,83 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, AlertCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
-import { calculateNextServiceKm, formatCcType, formatWhatsAppDate } from '../lib/utils';
-import { sendServiceNotification } from '../lib/messagebird';
-import { useApiCache, useDebounce } from '../lib/performance';
+import { calculateNextServiceKm, formatCcType } from '../lib/utils';
 import ExcelImport from '../components/ui/ExcelImport';
 import { Modal } from '../components/ui/Modal';
+import DateRangePicker from '../components/ui/DateRangePicker';
+import { generateServiceReport } from '../lib/pdfUtils';
 import "react-datepicker/dist/react-datepicker.css";
 
 function ScooterDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+
+  // State management
   const [scooter, setScooter] = useState(null);
   const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [expandedService, setExpandedService] = useState(null);
+  const [error, setError] = useState(null);
   const [showAddService, setShowAddService] = useState(false);
   const [updating, setUpdating] = useState(false);
   const [serviceToDelete, setServiceToDelete] = useState(null);
   const [showDeleteServiceModal, setShowDeleteServiceModal] = useState(false);
   const [showDeleteScooterModal, setShowDeleteScooterModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // New service form state
   const [newService, setNewService] = useState({
     current_km: '',
     service_details: '',
     service_date: new Date().toISOString().split('T')[0]
   });
 
-  // Use API cache for fetching details
-  const { getCachedData, setCachedData } = useApiCache(`scooter-${id}`);
-
-  const fetchScooterDetails = useCallback(async () => {
+  // Fetch scooter details
+  const fetchScooterDetails = async () => {
     try {
       setLoading(true);
 
-      // Check cache first
-      const cachedData = getCachedData();
-      if (cachedData) {
-        setScooter(cachedData.scooter);
-        setServices(cachedData.services);
-        setLoading(false);
-        return;
-      }
+      const { data: scooterData, error: scooterError } = await supabase
+        .from('scooters')
+        .select('*, category:categories(*)')
+        .eq('id', id)
+        .single();
 
-      const [scooterResponse, servicesResponse] = await Promise.all([
-        supabase
-          .from('scooters')
-          .select('*, category:categories(*)')
-          .eq('id', id)
-          .single(),
-        supabase
-          .from('services')
-          .select('*')
-          .eq('scooter_id', id)
-          .order('service_date', { ascending: false })
-      ]);
+      if (scooterError) throw scooterError;
 
-      if (scooterResponse.error) throw scooterResponse.error;
-      if (servicesResponse.error) throw servicesResponse.error;
+      const { data: servicesData, error: servicesError } = await supabase
+        .from('services')
+        .select('*')
+        .eq('scooter_id', id)
+        .order('service_date', { ascending: false });
 
-      // Cache the results
-      setCachedData({
-        scooter: scooterResponse.data,
-        services: servicesResponse.data || []
-      });
+      if (servicesError) throw servicesError;
 
-      setScooter(scooterResponse.data);
-      setServices(servicesResponse.data || []);
-    } catch (error) {
-      console.error('Error:', error);
+      setScooter(scooterData);
+      setServices(servicesData || []);
+    } catch (err) {
+      console.error('Error:', err);
+      setError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [id, getCachedData, setCachedData]);
+  };
 
   useEffect(() => {
     fetchScooterDetails();
-  }, [fetchScooterDetails]);
+  }, [id]);
 
+  // Handle adding new service
   const handleAddService = async (e) => {
     e.preventDefault();
     try {
       const currentKm = parseInt(newService.current_km);
       const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
 
-      // Add service record to database
       const { error } = await supabase
         .from('services')
         .insert([{
@@ -106,19 +96,6 @@ function ScooterDetails() {
         .update({ status: 'active' })
         .eq('id', id);
 
-      // Send WhatsApp notification in background
-      try {
-        await sendServiceNotification({
-          date: formatWhatsAppDate(newService.service_date),
-          scooterId: scooter.id,
-          currentKm: currentKm,
-          nextKm: nextKm,
-          category: scooter.category?.name
-        });
-      } catch (notificationError) {
-        console.error('WhatsApp notification error:', notificationError);
-      }
-
       setNewService({
         current_km: '',
         service_details: '',
@@ -131,6 +108,56 @@ function ScooterDetails() {
       alert('Error adding service');
     }
   };
+
+  // Handle deleting individual service
+  const handleDeleteService = async (serviceId) => {
+    try {
+      setIsDeleting(true);
+      const { error } = await supabase
+        .from('services')
+        .delete()
+        .eq('id', serviceId);
+
+      if (error) throw error;
+      await fetchScooterDetails();
+      setShowDeleteServiceModal(false);
+      setServiceToDelete(null);
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error deleting service');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Handle deleting scooter
+  const handleDeleteScooter = async () => {
+    try {
+      setIsDeleting(true);
+      
+      // Delete services first
+      await supabase.from('services').delete().eq('scooter_id', id);
+      
+      // Delete damages
+      await supabase.from('damages').delete().eq('scooter_id', id);
+      
+      // Finally delete scooter
+      const { error } = await supabase
+        .from('scooters')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      navigate('/');
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error deleting scooter');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Toggle scooter status
   const toggleStatus = async () => {
     try {
       setUpdating(true);
@@ -155,34 +182,32 @@ function ScooterDetails() {
     }
   };
 
-  const handleDeleteScooter = async () => {
+  // Handle export
+  const handleExport = async (startDate, endDate) => {
     try {
-      setIsDeleting(true);
-
-      await Promise.all([
-        supabase
-          .from('services')
-          .delete()
-          .eq('scooter_id', id),
-        supabase
-          .from('damages')
-          .delete()
-          .eq('scooter_id', id)
-      ]);
-
-      const { error } = await supabase
-        .from('scooters')
-        .delete()
-        .eq('id', id);
+      setIsExporting(true);
+      const { data: exportServices, error } = await supabase
+        .from('services')
+        .select('*, scooter:scooters(id, category:categories(name))')
+        .eq('scooter_id', id)
+        .gte('service_date', startDate)
+        .lte('service_date', endDate)
+        .order('service_date', { ascending: false });
 
       if (error) throw error;
 
-      navigate('/');
+      await generateServiceReport({
+        categoryName: scooter.category?.name || 'Unknown',
+        dateRange: { startDate, endDate },
+        services: exportServices
+      });
+
+      setShowExportModal(false);
     } catch (error) {
-      console.error('Error deleting scooter:', error);
-      alert('Error deleting scooter');
+      console.error('Error:', error);
+      alert('Error exporting service history');
     } finally {
-      setIsDeleting(false);
+      setIsExporting(false);
     }
   };
 
@@ -190,6 +215,23 @@ function ScooterDetails() {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen p-4">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-md w-full">
+          <h2 className="text-red-600 text-lg font-semibold mb-2">Error Loading Scooter</h2>
+          <p className="text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={() => navigate('/')}
+            className="text-blue-600 hover:text-blue-700"
+          >
+            Return to home
+          </button>
+        </div>
       </div>
     );
   }
@@ -209,7 +251,7 @@ function ScooterDetails() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 md:px-6">
+    <div className="max-w-4xl mx-auto px-4 md:px-6 pt-16 md:pt-4">
       {/* Header */}
       <div className="mb-6">
         <div className="flex items-center gap-4 mb-4">
@@ -267,10 +309,19 @@ function ScooterDetails() {
               onImportComplete={fetchScooterDetails}
             />
             <button
+              onClick={() => setShowExportModal(true)}
+              className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg 
+                       hover:bg-blue-200 transition-colors flex items-center gap-2"
+            >
+              <FileDown className="h-4 w-4" />
+              Export History
+            </button>
+            <button
               onClick={() => setShowAddService(true)}
               className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 
-                       text-sm font-medium"
+                       text-sm font-medium flex items-center gap-2"
             >
+              <Plus className="h-4 w-4" />
               Add Service
             </button>
           </div>
@@ -332,12 +383,15 @@ function ScooterDetails() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-xl font-bold">Add Service for {scooter.id}</h2>
-              {scooter.category?.name.toLowerCase() === 'bolt' && (
-                <p className="text-sm text-gray-600 mt-1">
-                  WhatsApp notification will be sent to both primary and Bolt numbers
-                </p>
-              )}
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold">Add Service for {scooter.id}</h2>
+                <button
+                  onClick={() => setShowAddService(false)}
+                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X className="h-5 w-5 text-gray-500" />
+                </button>
+              </div>
             </div>
             
             <form onSubmit={handleAddService} className="p-6 space-y-4">
@@ -417,8 +471,17 @@ function ScooterDetails() {
         title="Delete Service Record"
       >
         <div className="p-6">
+          <div className="flex items-center gap-3 text-red-600 mb-4">
+            <AlertCircle className="h-6 w-6" />
+            <p className="font-medium">Warning: This action cannot be undone</p>
+          </div>
+
           <p className="text-gray-600 mb-6">
-            Are you sure you want to delete this service record? This action cannot be undone.
+            Are you sure you want to delete this service record? 
+            <div className="mt-2 p-3 bg-gray-50 rounded-lg">
+              <p className="font-medium">Date: {serviceToDelete && new Date(serviceToDelete.service_date).toLocaleDateString()}</p>
+              <p className="mt-1">Service Details: {serviceToDelete?.service_details}</p>
+            </div>
           </p>
 
           <div className="flex justify-end gap-3">
@@ -432,26 +495,7 @@ function ScooterDetails() {
               Cancel
             </button>
             <button
-              onClick={async () => {
-                try {
-                  setIsDeleting(true);
-                  const { error } = await supabase
-                    .from('services')
-                    .delete()
-                    .eq('id', serviceToDelete.id);
-
-                  if (error) throw error;
-
-                  setShowDeleteServiceModal(false);
-                  setServiceToDelete(null);
-                  fetchScooterDetails();
-                } catch (error) {
-                  console.error('Error:', error);
-                  alert('Error deleting service');
-                } finally {
-                  setIsDeleting(false);
-                }
-              }}
+              onClick={() => handleDeleteService(serviceToDelete?.id)}
               disabled={isDeleting}
               className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 
                        disabled:opacity-50 flex items-center gap-2"
@@ -522,6 +566,15 @@ function ScooterDetails() {
           </div>
         </div>
       </Modal>
+
+      {/* Export Modal */}
+      <DateRangePicker
+        isOpen={showExportModal}
+        onClose={() => setShowExportModal(false)}
+        onExport={handleExport}
+        isLoading={isExporting}
+        categoryName={scooter.category?.name}
+      />
     </div>
   );
 }

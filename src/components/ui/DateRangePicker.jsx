@@ -1,5 +1,3 @@
-// src/components/ui/DateRangePicker.jsx
-
 import { useState } from 'react';
 import PropTypes from 'prop-types';
 import { X, Calendar, FileDown } from 'lucide-react';
