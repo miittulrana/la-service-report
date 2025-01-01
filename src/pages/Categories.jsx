@@ -23,8 +23,20 @@ function Categories() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [exportingCategory, setExportingCategory] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
-  // New state for mobile dropdowns
+  // New states for mobile
   const [expandedCategory, setExpandedCategory] = useState(null);
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  // Scroll handler
+  useEffect(() => {
+    const handleScroll = () => {
+      const scrollPosition = window.scrollY;
+      setIsScrolled(scrollPosition > 100); // Change sticky behavior after 100px scroll
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -195,7 +207,6 @@ function Categories() {
     }
   };
 
-  // Toggle category expansion for mobile
   const toggleCategory = (categoryId) => {
     setExpandedCategory(expandedCategory === categoryId ? null : categoryId);
   };
@@ -224,7 +235,7 @@ function Categories() {
   return (
     <div className="py-4 max-w-7xl mx-auto px-4">
       {/* Search Bar */}
-      <div className="sticky top-16 bg-gray-50 py-4 z-10">
+      <div className="sticky top-16 bg-gray-50 py-4 z-20">
         <input
           type="search"
           placeholder="Search any scooter..."
@@ -237,46 +248,52 @@ function Categories() {
       {/* Categories Grid */}
       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCategories.map(category => (
-          <div key={category.id} className="bg-white rounded-lg shadow-sm p-6">
-            {/* Category Header - Always visible */}
+          <div key={category.id} className="bg-white rounded-lg shadow-sm">
+            {/* Category Header - Sticky on mobile when scrolled */}
             <div 
-              className="flex justify-between items-center mb-6 cursor-pointer md:cursor-default"
-              onClick={() => toggleCategory(category.id)}
+              className={`p-6 bg-white md:bg-transparent transition-all duration-300 
+                         md:relative ${isScrolled ? 'sticky top-32 z-10' : ''}`}
             >
-              <h2 className="text-xl font-bold flex items-center gap-3">
-                {category.name}
-                <ChevronDown 
-                  className={`h-5 w-5 transition-transform md:hidden ${expandedCategory === category.id ? 'rotate-180' : ''}`} 
-                />
+              <div 
+                className="flex justify-between items-center cursor-pointer md:cursor-default"
+                onClick={() => toggleCategory(category.id)}
+              >
+                <h2 className="text-xl font-bold flex items-center gap-3">
+                  {category.name}
+                  <ChevronDown 
+                    className={`h-5 w-5 transition-transform md:hidden 
+                             ${expandedCategory === category.id ? 'rotate-180' : ''}`} 
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setExportingCategory(category);
+                      setShowDatePicker(true);
+                    }}
+                    className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50
+                             rounded-lg transition-colors"
+                    title="Export Service History"
+                  >
+                    <FileDown className="h-5 w-5" />
+                  </button>
+                </h2>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    setExportingCategory(category);
-                    setShowDatePicker(true);
+                    setSelectedCategory(category.id);
+                    setSelectedCategoryName(category.name);
+                    setShowAddModal(true);
                   }}
-                  className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50
-                           rounded-lg transition-colors"
-                  title="Export Service History"
+                  className="bg-blue-500 text-white text-sm font-medium whitespace-nowrap
+                           md:px-3 md:py-1.5 px-10 py-2.5 rounded-lg hover:bg-blue-600"
                 >
-                  <FileDown className="h-5 w-5" />
+                  Add Scooter
                 </button>
-              </h2>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedCategory(category.id);
-                  setSelectedCategoryName(category.name);
-                  setShowAddModal(true);
-                }}
-                className="bg-blue-500 text-white text-sm font-medium whitespace-nowrap
-                         md:px-3 md:py-1.5 px-10 py-2.5 rounded-lg hover:bg-blue-600"
-              >
-                Add Scooter
-              </button>
+              </div>
             </div>
             
             {/* Scooters Stack - Hidden on mobile unless expanded */}
-            <div className={`space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
+            <div className={`p-6 pt-0 space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
               {category.scooters?.map(scooter => {
                 const damageStatus = getDamageAlertStatus(scooter.damages);
                 
