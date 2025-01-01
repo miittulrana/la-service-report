@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getDamageAlertStatus, formatCcType } from '../lib/utils';
-import { AlertCircle, Plus, X, Trash2, FileDown } from 'lucide-react';
-import { useApiCache, useDebounce } from '../lib/performance';
+import { AlertCircle, Plus, X, Trash2, FileDown, ChevronDown } from 'lucide-react';
+import { useDebounce } from '../lib/performance';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { generateServiceReport } from '../lib/pdfUtils';
 
@@ -20,11 +20,11 @@ function Categories() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [scooterToDelete, setScooterToDelete] = useState(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  // New states for export functionality
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [exportingCategory, setExportingCategory] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
+  // New state for mobile dropdowns
+  const [expandedCategory, setExpandedCategory] = useState(null);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -74,14 +74,12 @@ function Categories() {
     fetchCategories();
   }, [fetchCategories]);
 
-  // Export handler
   const handleExport = async (startDate, endDate) => {
     if (!exportingCategory) return;
     
     try {
       setIsExporting(true);
       
-      // Fetch services for the selected category within date range
       const { data: services, error } = await supabase
         .from('services')
         .select(`
@@ -98,7 +96,6 @@ function Categories() {
 
       if (error) throw error;
 
-      // Generate and download PDF
       await generateServiceReport({
         categoryName: exportingCategory.name,
         dateRange: { startDate, endDate },
@@ -114,6 +111,7 @@ function Categories() {
       setExportingCategory(null);
     }
   };
+
   const handleAddScooter = async (e) => {
     e.preventDefault();
     try {
@@ -197,7 +195,11 @@ function Categories() {
     }
   };
 
-  // Memoized filtered scooters for each category
+  // Toggle category expansion for mobile
+  const toggleCategory = (categoryId) => {
+    setExpandedCategory(expandedCategory === categoryId ? null : categoryId);
+  };
+
   const filteredCategories = useMemo(() => {
     return categories.map(category => ({
       ...category,
@@ -207,7 +209,6 @@ function Categories() {
     }));
   }, [categories, searchTerm]);
 
-  // Debounced search
   const debouncedSetSearchTerm = useDebounce((value) => {
     setSearchTerm(value);
   }, 300);
@@ -237,12 +238,19 @@ function Categories() {
       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCategories.map(category => (
           <div key={category.id} className="bg-white rounded-lg shadow-sm p-6">
-            <div className="flex justify-between items-center mb-6">
+            {/* Category Header - Always visible */}
+            <div 
+              className="flex justify-between items-center mb-6 cursor-pointer md:cursor-default"
+              onClick={() => toggleCategory(category.id)}
+            >
               <h2 className="text-xl font-bold flex items-center gap-3">
                 {category.name}
-                {/* Export Button */}
+                <ChevronDown 
+                  className={`h-5 w-5 transition-transform md:hidden ${expandedCategory === category.id ? 'rotate-180' : ''}`} 
+                />
                 <button
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
                     setExportingCategory(category);
                     setShowDatePicker(true);
                   }}
@@ -254,7 +262,8 @@ function Categories() {
                 </button>
               </h2>
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.stopPropagation();
                   setSelectedCategory(category.id);
                   setSelectedCategoryName(category.name);
                   setShowAddModal(true);
@@ -266,8 +275,8 @@ function Categories() {
               </button>
             </div>
             
-            {/* Scooters Stack */}
-            <div className="space-y-4">
+            {/* Scooters Stack - Hidden on mobile unless expanded */}
+            <div className={`space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
               {category.scooters?.map(scooter => {
                 const damageStatus = getDamageAlertStatus(scooter.damages);
                 
@@ -326,20 +335,6 @@ function Categories() {
           </div>
         ))}
       </div>
-
-      {/* Date Range Picker Modal for Export */}
-      {showDatePicker && (
-        <DateRangePicker
-          isOpen={showDatePicker}
-          onClose={() => {
-            setShowDatePicker(false);
-            setExportingCategory(null);
-          }}
-          onExport={handleExport}
-          isLoading={isExporting}
-          categoryName={exportingCategory?.name}
-        />
-      )}
 
       {/* Add Scooter Modal */}
       {showAddModal && (
@@ -422,7 +417,7 @@ function Categories() {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
@@ -479,6 +474,18 @@ function Categories() {
           </div>
         </div>
       )}
+
+      {/* Date Range Picker for Export */}
+      <DateRangePicker
+        isOpen={showDatePicker}
+        onClose={() => {
+          setShowDatePicker(false);
+          setExportingCategory(null);
+        }}
+        onExport={handleExport}
+        isLoading={isExporting}
+        categoryName={exportingCategory?.name}
+      />
     </div>
   );
 }
