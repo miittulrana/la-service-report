@@ -12,9 +12,55 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
   const fileInputRef = useRef(null);
 
   const convertExcelDate = (excelDate) => {
-    // Excel dates are number of days since 1900-01-01
-    const date = new Date(Math.round((excelDate - 25569) * 86400 * 1000));
-    return date.toISOString().split('T')[0];
+    try {
+      // Handle both date strings and Excel numeric dates
+      if (typeof excelDate === 'string') {
+        const date = new Date(excelDate);
+        if (!isNaN(date.getTime())) {
+          return date.toISOString().split('T')[0];
+        }
+      }
+      
+      // Excel dates are number of days since 1900-01-01
+      const date = new Date(Math.round((excelDate - 25569) * 86400 * 1000));
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().split('T')[0];
+      }
+      
+      throw new Error('Invalid date format');
+    } catch (error) {
+      console.error('Date conversion error:', { excelDate, error });
+      throw new Error('Invalid date format in Excel file');
+    }
+  };
+
+  const parseKilometers = (value) => {
+    // Handle various formats of kilometer values
+    if (typeof value === 'number') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      // Remove commas and other non-numeric characters except decimal point
+      const cleanValue = value.replace(/[^\d.]/g, '');
+      const number = parseFloat(cleanValue);
+      if (!isNaN(number)) {
+        return number;
+      }
+    }
+    throw new Error('Invalid kilometer value');
+  };
+
+  const validateHeaders = (headers) => {
+    const requiredHeaders = ['SERVICE DATE', 'MILAGE', 'NEXT SERVICE AT'];
+    const missingHeaders = requiredHeaders.filter(
+      required => !headers.some(header => 
+        header && header.toString().toUpperCase().includes(required)
+      )
+    );
+
+    if (missingHeaders.length > 0) {
+      throw new Error(`Missing required columns: ${missingHeaders.join(', ')}`);
+    }
   };
 
   const handleFileUpload = async (event) => {
@@ -25,63 +71,105 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
       setIsModalOpen(true);
       setImportStatus('processing');
 
+      // Read the Excel file
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, {
-        cellDates: false // Set to false to handle Excel date numbers
+        cellDates: false, // Get raw date values
+        cellNF: false,    // Don't parse number formats
+        cellText: false   // Don't generate text versions
       });
 
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      
+      // Get headers from first row
+      const range = XLSX.utils.decode_range(worksheet['!ref']);
+      const headers = [];
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const cell = worksheet[XLSX.utils.encode_cell({ r: range.s.r, c: C })];
+        headers.push(cell ? cell.v : undefined);
+      }
 
-      console.log('Parsed Excel Data:', jsonData); // Debug log
+      // Validate headers
+      validateHeaders(headers);
+
+      // Convert to JSON with header row
+      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+      console.log('Parsed Excel Data:', jsonData);
 
       // Format data for database
       const serviceRecords = jsonData
-        .filter(row => {
-          return row['MILAGE'] !== undefined && 
-                 row['NEXT SERVICE AT'] !== undefined && 
-                 row['SERVICE DATE'] !== undefined;
-        })
-        .map(row => {
-          console.log('Processing row:', row); // Debug log
+        .map((row, index) => {
+          try {
+            // Log row being processed
+            console.log('Processing row:', { rowNumber: index + 2, data: row });
 
-          const currentKm = parseInt(row['MILAGE']);
-          const nextKm = parseInt(row['NEXT SERVICE AT']);
-          const serviceDate = convertExcelDate(row['SERVICE DATE']);
-          const workDone = row['DONE'] || '';
+            const currentKm = parseKilometers(row['MILAGE']);
+            const nextKm = parseKilometers(row['NEXT SERVICE AT']);
+            const serviceDate = convertExcelDate(row['SERVICE DATE']);
+            const workDone = row['DONE'] || '';
 
-          if (isNaN(currentKm) || isNaN(nextKm)) {
-            console.log('Invalid KM values:', { current: currentKm, next: nextKm });
-            throw new Error('Invalid kilometer values in Excel');
+            // Validate values
+            if (isNaN(currentKm) || isNaN(nextKm)) {
+              console.log('Invalid KM values:', { currentKm, nextKm, rowNumber: index + 2 });
+              throw new Error('Invalid kilometer values');
+            }
+
+            // Validate KM logic
+            if (nextKm <= currentKm) {
+              console.log('Next KM not greater than current:', { currentKm, nextKm, rowNumber: index + 2 });
+              throw new Error('Next service KM must be greater than current KM');
+            }
+
+            // Validate positive values
+            if (currentKm < 0 || nextKm < 0) {
+              console.log('Negative KM values:', { currentKm, nextKm, rowNumber: index + 2 });
+              throw new Error('Kilometer values cannot be negative');
+            }
+
+            return {
+              scooter_id: scooterId,
+              service_date: serviceDate,
+              current_km: currentKm,
+              next_km: nextKm,
+              service_details: workDone.trim()
+            };
+          } catch (error) {
+            console.error(`Error processing row ${index + 2}:`, error);
+            return null;
           }
+        })
+        .filter(record => record !== null);
 
-          return {
-            scooter_id: scooterId,
-            service_date: serviceDate,
-            current_km: currentKm,
-            next_km: nextKm,
-            service_details: workDone
-          };
-        });
-
-      console.log('Processed Records:', serviceRecords); // Debug log
-
+      // Validate we have records to import
       if (serviceRecords.length === 0) {
         throw new Error('No valid records found in Excel file');
       }
 
+      console.log('Records to import:', serviceRecords);
+
+      // Sort records by date ascending
+      serviceRecords.sort((a, b) => new Date(a.service_date) - new Date(b.service_date));
+
+      // Insert records into database
       const { error } = await supabase
         .from('services')
         .insert(serviceRecords);
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase insert error:', error);
+        if (error.message.includes('services_check')) {
+          throw new Error('Invalid service record: Please ensure next service KM is greater than current KM');
+        }
+        throw error;
+      }
 
+      // Success handling
       setImportStatus('success');
       setImportDetails({
         totalRecords: serviceRecords.length,
         dateRange: {
-          first: new Date(serviceRecords[serviceRecords.length-1].service_date).toLocaleDateString(),
-          last: new Date(serviceRecords[0].service_date).toLocaleDateString()
+          first: new Date(serviceRecords[0].service_date).toLocaleDateString(),
+          last: new Date(serviceRecords[serviceRecords.length - 1].service_date).toLocaleDateString()
         }
       });
 
@@ -97,6 +185,7 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
       });
     }
 
+    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
