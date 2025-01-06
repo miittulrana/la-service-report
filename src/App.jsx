@@ -16,13 +16,13 @@ const PageLoader = ({ message = 'Loading...' }) => (
 );
 
 // Error Boundary Component
-const ErrorFallback = ({ error, resetErrorBoundary }) => (
+const ErrorFallback = ({ message, resetError }) => (
   <div className="min-h-screen flex flex-col items-center justify-center p-4">
     <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md w-full">
       <h2 className="text-red-600 text-lg font-semibold mb-2">Something went wrong</h2>
-      <p className="text-gray-600 mb-4">{error.message}</p>
+      <p className="text-gray-600 mb-4">{message}</p>
       <button
-        onClick={resetErrorBoundary}
+        onClick={resetError}
         className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
       >
         Try again
@@ -53,14 +53,7 @@ function App() {
 
   // Show connection error if any
   if (connectionError) {
-    return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md w-full">
-          <h2 className="text-red-600 text-lg font-semibold mb-2">Connection Error</h2>
-          <p className="text-gray-600">{connectionError}</p>
-        </div>
-      </div>
-    );
+    return <ErrorFallback message={connectionError} resetError={() => window.location.reload()} />;
   }
 
   // Show loading while checking connection
@@ -70,7 +63,7 @@ function App() {
 
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50 flex flex-col">
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50/50 via-blue-50/30 to-gray-50 flex flex-col">
         <Nav />
         
         <main className="flex-grow py-4 md:pt-20">
