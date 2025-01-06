@@ -1,15 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown, MessageSquare } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
 import { calculateNextServiceKm, formatDate, formatKm } from '../lib/utils';
 import ExcelImport from '../components/ui/ExcelImport';
-import { Modal } from '../components/ui/Modal';
+import { Modal, WhatsAppModal } from '../components/ui/Modal';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { generateServiceReport } from '../lib/pdfUtils';
-import { sendServiceNotification } from '../lib/messagebird';
+import { sendServiceNotification, resendServiceNotification } from '../lib/messagebird';
 import "react-datepicker/dist/react-datepicker.css";
 
 function ScooterDetails() {
@@ -30,6 +30,11 @@ function ScooterDetails() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState(null);
+  
+  // New WhatsApp states
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [selectedService, setSelectedService] = useState(null);
+  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
   // New service form state
   const [newService, setNewService] = useState({
@@ -76,70 +81,107 @@ function ScooterDetails() {
     fetchScooterDetails();
   }, [id]);
 
-// Handle adding new service with WhatsApp notification
-const handleAddService = async (e) => {
-  e.preventDefault();
-  try {
-    const currentKm = parseInt(newService.current_km);
-    const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
+  // Handle adding new service with WhatsApp notification
+  const handleAddService = async (e) => {
+    e.preventDefault();
+    try {
+      const currentKm = parseInt(newService.current_km);
+      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
 
-    // First, save to database
-    const { data: serviceData, error } = await supabase
-      .from('services')
-      .insert([{
-        scooter_id: id,
-        service_date: newService.service_date,
-        current_km: currentKm,
-        next_km: nextKm,
-        service_details: newService.service_details
-      }])
-      .select()
-      .single();
+      // First, save to database
+      const { data: serviceData, error } = await supabase
+        .from('services')
+        .insert([{
+          scooter_id: id,
+          service_date: newService.service_date,
+          current_km: currentKm,
+          next_km: nextKm,
+          service_details: newService.service_details
+        }])
+        .select()
+        .single();
 
-    if (error) throw error;
+      if (error) throw error;
 
-    // Update scooter status
-    await supabase
-      .from('scooters')
-      .update({ status: 'active' })
-      .eq('id', id);
+      // Update scooter status
+      await supabase
+        .from('scooters')
+        .update({ status: 'active' })
+        .eq('id', id);
 
-    // Send WhatsApp notification
-    const notificationSent = await sendServiceNotification({
-      date: newService.service_date,
-      scooterId: id,
-      currentKm: currentKm,
-      nextKm: nextKm,
-      serviceDetails: newService.service_details.trim(),
-      category: scooter.category?.name || ''
-    });
+      // Send WhatsApp notification
+      const notificationResult = await sendServiceNotification({
+        date: newService.service_date,
+        scooterId: id,
+        currentKm: currentKm,
+        nextKm: nextKm,
+        serviceDetails: newService.service_details.trim(),
+        category: scooter.category?.name
+      });
 
-    setNotificationStatus({
-      success: notificationSent,
-      message: notificationSent 
-        ? 'Service added and notification sent successfully'
-        : 'Service added but WhatsApp notification failed'
-    });
+      setNotificationStatus({
+        success: notificationResult.success,
+        message: notificationResult.success 
+          ? 'Service added and notification sent successfully'
+          : `Service added but WhatsApp notification failed: ${notificationResult.error}`
+      });
 
-    // Reset form and refresh
-    setNewService({
-      current_km: '',
-      service_details: '',
-      service_date: new Date().toISOString().split('T')[0]
-    });
-    setShowAddService(false);
-    await fetchScooterDetails();
+      // Reset form and refresh
+      setNewService({
+        current_km: '',
+        service_details: '',
+        service_date: new Date().toISOString().split('T')[0]
+      });
+      setShowAddService(false);
+      await fetchScooterDetails();
 
-  } catch (error) {
-    console.error('Error adding service:', error);
-    setNotificationStatus({
-      success: false,
-      message: 'Error: Failed to add service'
-    });
-  }
-};
+    } catch (error) {
+      console.error('Error adding service:', error);
+      setNotificationStatus({
+        success: false,
+        message: 'Error: Failed to add service'
+      });
+    }
+  };
 
-  // Handle deleting individual service
+  // Handle WhatsApp resend
+  const handleWhatsAppClick = (service) => {
+    setSelectedService(service);
+    setShowWhatsAppModal(true);
+  };
+
+  // Handle WhatsApp send
+  const handleWhatsAppSend = async (numberType) => {
+    try {
+      setSendingWhatsApp(true);
+      
+      const result = await resendServiceNotification({
+        date: selectedService.service_date,
+        scooterId: id,
+        currentKm: selectedService.current_km,
+        nextKm: selectedService.next_km,
+        serviceDetails: selectedService.service_details
+      }, numberType);
+
+      setNotificationStatus({
+        success: result.success,
+        message: result.success 
+          ? `Notification resent to ${numberType} number successfully`
+          : `Failed to resend notification: ${result.error}`
+      });
+    } catch (error) {
+      console.error('WhatsApp send error:', error);
+      setNotificationStatus({
+        success: false,
+        message: 'Failed to send WhatsApp notification'
+      });
+    } finally {
+      setSendingWhatsApp(false);
+      setShowWhatsAppModal(false);
+      setSelectedService(null);
+    }
+  };
+
   const handleDeleteService = async (serviceId) => {
     try {
       setIsDeleting(true);
@@ -160,18 +202,13 @@ const handleAddService = async (e) => {
     }
   };
 
-  // Handle deleting scooter
   const handleDeleteScooter = async () => {
     try {
       setIsDeleting(true);
       
-      // Delete services first
       await supabase.from('services').delete().eq('scooter_id', id);
-      
-      // Delete damages
       await supabase.from('damages').delete().eq('scooter_id', id);
       
-      // Finally delete scooter
       const { error } = await supabase
         .from('scooters')
         .delete()
@@ -187,7 +224,6 @@ const handleAddService = async (e) => {
     }
   };
 
-  // Toggle scooter status
   const toggleStatus = async () => {
     try {
       setUpdating(true);
@@ -212,7 +248,6 @@ const handleAddService = async (e) => {
     }
   };
 
-  // Handle export
   const handleExport = async (startDate, endDate) => {
     try {
       setIsExporting(true);
@@ -386,15 +421,24 @@ const handleAddService = async (e) => {
                     {formatKm(service.current_km)} km → {formatKm(service.next_km)} km
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setServiceToDelete(service);
-                    setShowDeleteServiceModal(true);
-                  }}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 className="h-5 w-5" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleWhatsAppClick(service)}
+                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    title="Resend WhatsApp Notification"
+                  >
+                    <MessageSquare className="h-5 w-5" />
+                  </button>
+                  <button
+                    onClick={() => {
+                      setServiceToDelete(service);
+                      setShowDeleteServiceModal(true);
+                    }}
+                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <Trash2 className="h-5 w-5" />
+                  </button>
+                </div>
               </div>
 
               <div className="mt-4 pt-4 border-t">
@@ -610,6 +654,18 @@ const handleAddService = async (e) => {
         onExport={handleExport}
         isLoading={isExporting}
         categoryName={scooter.category?.name}
+      />
+
+      {/* WhatsApp Modal */}
+      <WhatsAppModal
+        isOpen={showWhatsAppModal}
+        onClose={() => {
+          setShowWhatsAppModal(false);
+          setSelectedService(null);
+        }}
+        onSend={handleWhatsAppSend}
+        category={scooter?.category?.name}
+        isLoading={sendingWhatsApp}
       />
     </div>
   );

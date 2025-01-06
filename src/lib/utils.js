@@ -1,264 +1,236 @@
 /**
- * Enhanced utility functions for LA Service Record
- */
-
-/**
  * Date formatter
  * Formats a date into DD/MM/YYYY format with optional time
- * @param {string|Date} date - Date to format
- * @param {boolean} includeTime - Whether to include time in the format
- * @returns {string} Formatted date string
  */
 export const formatDate = (date, includeTime = false) => {
   if (!date) return '';
   
   try {
-    const dateObj = new Date(date);
-    if (isNaN(dateObj.getTime())) return '';
+      const dateObj = new Date(date);
+      if (isNaN(dateObj.getTime())) return '';
 
-    const options = {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      ...(includeTime && {
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    };
+      const options = {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          ...(includeTime && {
+              hour: '2-digit',
+              minute: '2-digit'
+          })
+      };
 
-    return dateObj.toLocaleDateString('en-GB', options);
+      return dateObj.toLocaleDateString('en-GB', options);
   } catch (error) {
-    console.error('Date formatting error:', error);
-    return '';
+      console.error('Date formatting error:', error);
+      return '';
   }
 };
 
 /**
- * KM formatter with commas and validation
- * @param {number|string} km - Kilometer value to format
- * @returns {string} Formatted kilometer string
- */
+* KM formatter with commas
+*/
 export const formatKm = (km) => {
   if (!km && km !== 0) return '0';
   
   try {
-    const numKm = typeof km === 'string' ? parseFloat(km) : km;
-    if (isNaN(numKm)) return '0';
-    
-    return numKm.toLocaleString('en-US', {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0
-    });
+      const numKm = typeof km === 'string' ? parseFloat(km) : km;
+      if (isNaN(numKm)) return '0';
+      
+      return numKm.toLocaleString('en-US', {
+          minimumFractionDigits: 0,
+          maximumFractionDigits: 0
+      });
   } catch (error) {
-    console.error('KM formatting error:', error);
-    return '0';
+      console.error('KM formatting error:', error);
+      return '0';
   }
 };
 
 /**
- * Get Tailwind CSS classes for different status types
- * @param {string} status - Status value
- * @returns {string} Tailwind CSS classes
- */
+* Status color helper
+*/
 export const getStatusColor = (status) => {
   const colors = {
-    active: 'bg-green-100 text-green-700 border-green-200',
-    'service soon': 'bg-yellow-100 text-yellow-700 border-yellow-200',
-    'needs service': 'bg-red-100 text-red-700 border-red-200',
-    inactive: 'bg-gray-100 text-gray-700 border-gray-200',
-    unknown: 'bg-gray-100 text-gray-700 border-gray-200'
+      active: 'bg-green-100 text-green-700 border-green-200',
+      'service soon': 'bg-yellow-100 text-yellow-700 border-yellow-200',
+      'needs service': 'bg-red-100 text-red-700 border-red-200',
+      inactive: 'bg-gray-100 text-gray-700 border-gray-200',
+      unknown: 'bg-gray-100 text-gray-700 border-gray-200'
   };
   return colors[status?.toLowerCase()] || colors.unknown;
 };
 
 /**
- * Calculate next service KM based on CC type with validation
- * @param {number} currentKm - Current kilometer reading
- * @param {string} ccType - Engine CC type
- * @returns {number} Next service kilometer reading
- */
+* Calculate next service KM based on CC type
+*/
 export const calculateNextServiceKm = (currentKm, ccType) => {
-  if (typeof currentKm !== 'number' || isNaN(currentKm)) {
-    console.error('Invalid current KM value:', currentKm);
-    return 0;
-  }
+  if (!currentKm || typeof currentKm !== 'number' || isNaN(currentKm)) return 0;
 
   const intervals = {
-    '125cc BOLT': 3000,
-    '125cc': 4000,
-    '50cc': 2500,
-    'default': 4000
+      '125cc BOLT': 3000,
+      '125cc': 4000,
+      '50cc': 2500
   };
 
-  const interval = intervals[ccType] || intervals.default;
+  const interval = intervals[ccType] || 4000; // Default to 4000 if type not found
   return currentKm + interval;
 };
 
 /**
- * Get damage alert status and styling
- * @param {Array} damages - Array of damage records
- * @returns {Object} Status object with alert information
- */
+* Get damage alert status and styling
+*/
 export const getDamageAlertStatus = (damages = []) => {
   if (!Array.isArray(damages)) return {
-    hasDamage: false,
-    style: '',
-    text: ''
+      hasDamage: false,
+      style: '',
+      text: ''
   };
 
-  const unresolvedDamages = damages.filter(damage => damage && !damage.resolved);
+  const unresolvedDamages = damages.filter(damage => 
+      damage && !damage.resolved
+  );
   
   if (unresolvedDamages.length > 0) {
-    return {
-      hasDamage: true,
-      style: 'border-red-300 bg-red-50',
-      text: `${unresolvedDamages.length} damage${unresolvedDamages.length > 1 ? 's' : ''} reported`
-    };
+      return {
+          hasDamage: true,
+          style: 'border-red-300 bg-red-50',
+          text: `${unresolvedDamages.length} damage${unresolvedDamages.length > 1 ? 's' : ''} reported`
+      };
   }
 
   return {
-    hasDamage: false,
-    style: '',
-    text: ''
+      hasDamage: false,
+      style: '',
+      text: ''
   };
 };
 
 /**
- * Format date specifically for damage reports
- * @param {string|Date} date - Date to format
- * @returns {string} Formatted date string with time
- */
+* Format damage date with time
+*/
 export const formatDamageDate = (date) => {
   return formatDate(date, true);
 };
 
 /**
- * Calculate service status based on kilometer readings
- * @param {number} currentKm - Current kilometer reading
- * @param {number} nextServiceKm - Next service kilometer reading
- * @returns {string} Service status
- */
+* Calculate service status
+*/
 export const calculateServiceStatus = (currentKm, nextServiceKm) => {
   if (!currentKm || !nextServiceKm) return 'unknown';
   
   try {
-    const difference = nextServiceKm - currentKm;
-    if (difference <= 0) return 'needs service';
-    if (difference <= 500) return 'service soon';
-    return 'active';
+      const difference = nextServiceKm - currentKm;
+      if (difference <= 0) return 'needs service';
+      if (difference <= 500) return 'service soon';
+      return 'active';
   } catch (error) {
-    console.error('Service status calculation error:', error);
-    return 'unknown';
+      console.error('Service status calculation error:', error);
+      return 'unknown';
   }
 };
 
 /**
- * Get service interval based on CC type
- * @param {string} ccType - Engine CC type
- * @returns {number} Service interval in kilometers
- */
+* Get service interval based on CC type
+*/
 export const getServiceInterval = (ccType) => {
   const intervals = {
-    '125cc BOLT': 3000,
-    '125cc': 4000,
-    '50cc': 2500,
-    'default': 4000
+      '125cc BOLT': 3000,
+      '125cc': 4000,
+      '50cc': 2500
   };
-  return intervals[ccType] || intervals.default;
+  return intervals[ccType] || 4000;
 };
 
 /**
- * Format service interval for display
- * @param {string} ccType - Engine CC type
- * @returns {string} Formatted interval string
- */
+* Get service interval text
+*/
 export const getServiceIntervalText = (ccType) => {
   return `${getServiceInterval(ccType)}km`;
 };
 
 /**
- * Format CC type for display with interval
- * @param {string} ccType - Engine CC type
- * @returns {string} Formatted CC type string
- */
+* Format CC type for display
+*/
 export const formatCcType = (ccType) => {
   const types = {
-    '125cc BOLT': 'Bolt (3000km)',
-    '125cc': '125cc (4000km)',
-    '50cc': '50cc (2500km)'
+      '125cc BOLT': 'Bolt (3000km)',
+      '125cc': '125cc (4000km)',
+      '50cc': '50cc (2500km)'
   };
   return types[ccType] || ccType || 'Unknown';
 };
 
 /**
- * Format date for WhatsApp messages
- * @param {string|Date} date - Date to format
- * @returns {string} Formatted date string
- */
+* Format date for WhatsApp messages
+*/
 export const formatWhatsAppDate = (date) => {
   return formatDate(date, true);
 };
 
 /**
- * Validate kilometer input
- * @param {number|string} km - Kilometer value to validate
- * @returns {boolean} Whether the input is valid
- */
-export const isValidKilometer = (km) => {
-  const numKm = typeof km === 'string' ? parseFloat(km) : km;
-  return !isNaN(numKm) && numKm >= 0 && numKm <= 999999;
-};
-
-/**
- * Calculate service due status with percentage
- * @param {number} currentKm - Current kilometer reading
- * @param {number} nextServiceKm - Next service kilometer reading
- * @returns {Object} Service status details
- */
-export const getServiceDueStatus = (currentKm, nextServiceKm) => {
-  if (!currentKm || !nextServiceKm) {
-    return { status: 'unknown', percentage: 0 };
-  }
-
-  try {
-    const difference = nextServiceKm - currentKm;
-    const interval = nextServiceKm - (currentKm - difference);
-    const percentage = Math.floor((difference / interval) * 100);
-
-    if (difference <= 0) {
-      return { status: 'needs service', percentage: 0 };
-    }
-    if (difference <= 500) {
-      return { status: 'service soon', percentage };
-    }
-    return { status: 'active', percentage };
-  } catch (error) {
-    console.error('Service due status calculation error:', error);
-    return { status: 'unknown', percentage: 0 };
-  }
-};
-
-/**
- * Format large numbers with K/M suffix
- * @param {number} value - Number to format
- * @returns {string} Formatted number string
- */
-export const formatLargeNumber = (value) => {
-  if (!value && value !== 0) return '0';
+* Validate service data for WhatsApp notification
+*/
+export const validateServiceData = (serviceData) => {
+  const required = ['date', 'scooterId', 'currentKm', 'nextKm', 'serviceDetails'];
+  const missing = required.filter(field => !serviceData?.[field]);
   
-  try {
-    const num = typeof value === 'string' ? parseFloat(value) : value;
-    if (isNaN(num)) return '0';
-    
-    if (num >= 1000000) {
-      return (num / 1000000).toFixed(1) + 'M';
-    }
-    if (num >= 1000) {
-      return (num / 1000).toFixed(1) + 'K';
-    }
-    return num.toString();
-  } catch (error) {
-    console.error('Number formatting error:', error);
-    return '0';
+  if (missing.length > 0) {
+      return {
+          isValid: false,
+          error: `Missing required fields: ${missing.join(', ')}`
+      };
   }
+
+  return {
+      isValid: true,
+      error: null
+  };
+};
+
+/**
+* Format service details for display
+*/
+export const formatServiceDetails = (details, maxLength = 200) => {
+  if (!details) return '';
+  return details.length > maxLength 
+      ? `${details.substring(0, maxLength)}...`
+      : details;
+};
+
+/**
+* Check if km value requires service
+*/
+export const needsService = (currentKm, nextServiceKm) => {
+  if (!currentKm || !nextServiceKm) return false;
+  return currentKm >= nextServiceKm;
+};
+
+/**
+* Get days until next service
+*/
+export const getDaysUntilService = (lastServiceDate, nextServiceKm, currentKm, dailyAverage = 100) => {
+  if (!lastServiceDate || !nextServiceKm || !currentKm) return null;
+  
+  const kmRemaining = nextServiceKm - currentKm;
+  if (kmRemaining <= 0) return 0;
+  
+  return Math.ceil(kmRemaining / dailyAverage);
+};
+
+export default {
+  formatDate,
+  formatKm,
+  getStatusColor,
+  calculateNextServiceKm,
+  getDamageAlertStatus,
+  formatDamageDate,
+  calculateServiceStatus,
+  getServiceInterval,
+  getServiceIntervalText,
+  formatCcType,
+  formatWhatsAppDate,
+  validateServiceData,
+  formatServiceDetails,
+  needsService,
+  getDaysUntilService
 };

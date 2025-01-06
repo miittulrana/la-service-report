@@ -16,6 +16,7 @@ const config = {
  * Format service details for WhatsApp message
  */
 const formatServiceDetails = (details) => {
+    if (!details) return '';
     return details.trim()
         .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
         .substring(0, 200);    // Limit length for WhatsApp
@@ -33,7 +34,7 @@ const formatMessageDate = (date) => {
         });
     } catch (error) {
         console.error('Date formatting error:', error);
-        return date.toString();
+        return date?.toString() || '';
     }
 };
 
@@ -62,8 +63,8 @@ const createMessagePayload = ({
                 parameters: [
                     { type: 'text', text: formatMessageDate(date) },
                     { type: 'text', text: scooterId },
-                    { type: 'text', text: currentKm.toLocaleString() },
-                    { type: 'text', text: nextKm.toLocaleString() },
+                    { type: 'text', text: currentKm?.toLocaleString() || '0' },
+                    { type: 'text', text: nextKm?.toLocaleString() || '0' },
                     { type: 'text', text: formatServiceDetails(serviceDetails) }
                 ]
             }]
@@ -93,11 +94,39 @@ const sendMessage = async (messagePayload, toNumber) => {
             throw new Error(errorData.errors?.[0]?.description || 'Failed to send message');
         }
 
-        return true;
+        return {
+            success: true,
+            error: null
+        };
     } catch (error) {
         console.error('Send message error:', error);
-        return false;
+        return {
+            success: false,
+            error: error.message
+        };
     }
+};
+
+/**
+ * Send message to primary number
+ */
+export const sendToPrimaryNumber = async (serviceData) => {
+    if (!serviceData || !config.numbers.primary) {
+        return { success: false, error: 'Invalid service data or primary number' };
+    }
+    const messagePayload = createMessagePayload(serviceData);
+    return sendMessage(messagePayload, config.numbers.primary);
+};
+
+/**
+ * Send message to Bolt number
+ */
+export const sendToBoltNumber = async (serviceData) => {
+    if (!serviceData || !config.numbers.bolt) {
+        return { success: false, error: 'Invalid service data or bolt number' };
+    }
+    const messagePayload = createMessagePayload(serviceData);
+    return sendMessage(messagePayload, config.numbers.bolt);
 };
 
 /**
@@ -117,49 +146,56 @@ export const sendServiceNotification = async ({
             throw new Error('Missing required parameters for notification');
         }
 
-        const messagePayload = createMessagePayload({
+        const serviceData = {
             date,
             scooterId,
             currentKm,
             nextKm,
             serviceDetails
-        });
+        };
 
-        // Always send to primary number
-        const primarySent = await sendMessage(messagePayload, config.numbers.primary);
+        // Send to primary number
+        const primaryResult = await sendToPrimaryNumber(serviceData);
 
-        // If it's a Bolt scooter, also send to Bolt number
-        let boltSent = true;
+        // For Bolt category, also send to Bolt number
+        let boltResult = { success: true };
         if (category?.toLowerCase().includes('bolt')) {
-            boltSent = await sendMessage(messagePayload, config.numbers.bolt);
+            boltResult = await sendToBoltNumber(serviceData);
         }
 
-        return primarySent && boltSent;
+        return {
+            success: primaryResult.success && boltResult.success,
+            primaryResult,
+            boltResult,
+            error: primaryResult.error || boltResult.error
+        };
     } catch (error) {
         console.error('Error in sendServiceNotification:', error);
-        return false;
+        return {
+            success: false,
+            primaryResult: { success: false },
+            boltResult: { success: false },
+            error: error.message
+        };
     }
 };
 
-// Export for testing purposes
-export const testWhatsAppIntegration = async () => {
+/**
+ * Resend notification for specific service
+ */
+export const resendServiceNotification = async (serviceData, numberType = 'primary') => {
     try {
-        const testMessage = {
-            date: new Date(),
-            scooterId: 'TEST123',
-            currentKm: 1000,
-            nextKm: 2000,
-            serviceDetails: 'Test service notification',
-            category: 'test'
-        };
+        // Validate service data
+        if (!serviceData?.date || !serviceData?.scooterId) {
+            throw new Error('Invalid service data for resend');
+        }
 
-        const result = await sendServiceNotification(testMessage);
-        return {
-            success: result,
-            message: 'Test notification processed successfully'
-        };
+        if (numberType === 'bolt') {
+            return await sendToBoltNumber(serviceData);
+        }
+        return await sendToPrimaryNumber(serviceData);
     } catch (error) {
-        console.error('WhatsApp integration test failed:', error);
+        console.error('Error resending notification:', error);
         return {
             success: false,
             error: error.message
@@ -169,5 +205,8 @@ export const testWhatsAppIntegration = async () => {
 
 export default {
     sendServiceNotification,
-    testWhatsAppIntegration
+    resendServiceNotification,
+    sendToPrimaryNumber,
+    sendToBoltNumber,
+    config
 };
