@@ -1,7 +1,7 @@
 // Configuration
 const config = {
     apiKey: 'ZtmGp69YV8Nlr5Etr6Ji9RXPtyMrIdaRnvvL',
-    channelId: 'f452b037-09c6-5838-9f3f-d8fd5342cae7',
+    channelId: '472631b5-19e3-5825-96ae-0647959b8f97',
     namespace: '1cd17d45-f759-4981-8af7-60d8f6ec8d85',
     templateName: 'LA Rentals Service Update',
     numbers: {
