@@ -11,18 +11,10 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
   const [importDetails, setImportDetails] = useState(null);
   const fileInputRef = useRef(null);
 
-  const formatDate = (dateString) => {
-    try {
-      // Format from YYYY-MM-DD to YYYY-MM-DD
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) {
-        throw new Error('Invalid date');
-      }
-      return dateString.split('T')[0]; // Remove time part if exists
-    } catch (error) {
-      console.error('Date parsing error:', { error, dateString });
-      throw new Error(`Invalid date format: ${dateString}`);
-    }
+  const convertExcelDate = (excelDate) => {
+    // Excel dates are number of days since 1900-01-01
+    const date = new Date(Math.round((excelDate - 25569) * 86400 * 1000));
+    return date.toISOString().split('T')[0];
   };
 
   const handleFileUpload = async (event) => {
@@ -35,16 +27,11 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
 
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, {
-        cellDates: true,
-        dateNF: 'yyyy-mm-dd'
+        cellDates: false // Set to false to handle Excel date numbers
       });
 
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      
-      // Get row data starting from row 2 (skip header)
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, {
-        range: 1  // Skip header row
-      });
+      const jsonData = XLSX.utils.sheet_to_json(worksheet);
 
       console.log('Parsed Excel Data:', jsonData); // Debug log
 
@@ -52,15 +39,15 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
       const serviceRecords = jsonData
         .filter(row => {
           return row['MILAGE'] !== undefined && 
-                 row['EXT SERVICE'] !== undefined && 
+                 row['NEXT SERVICE AT'] !== undefined && 
                  row['SERVICE DATE'] !== undefined;
         })
         .map(row => {
           console.log('Processing row:', row); // Debug log
 
           const currentKm = parseInt(row['MILAGE']);
-          const nextKm = parseInt(row['EXT SERVICE']);
-          const serviceDate = row['SERVICE DATE'];
+          const nextKm = parseInt(row['NEXT SERVICE AT']);
+          const serviceDate = convertExcelDate(row['SERVICE DATE']);
           const workDone = row['DONE'] || '';
 
           if (isNaN(currentKm) || isNaN(nextKm)) {
@@ -70,7 +57,7 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
 
           return {
             scooter_id: scooterId,
-            service_date: formatDate(serviceDate),
+            service_date: serviceDate,
             current_km: currentKm,
             next_km: nextKm,
             service_details: workDone
