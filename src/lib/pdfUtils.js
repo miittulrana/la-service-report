@@ -1,143 +1,82 @@
-import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
 import { formatDate, formatKm } from './utils';
+import html2pdf from 'html2pdf.js';
 
 /**
- * Adds centered text to PDF
+ * Create a PDF template string
  */
-const addCenteredText = (doc, text, y) => {
-  const pageWidth = doc.internal.pageSize.width;
-  const textWidth = doc.getStringUnitWidth(text) * doc.internal.getFontSize() / doc.internal.scaleFactor;
-  const x = (pageWidth - textWidth) / 2;
-  doc.text(text, x, y);
+const createPDFTemplate = ({ categoryName, dateRange, services }) => {
+  const rows = services.map(service => `
+    <tr>
+      <td style="padding: 8px; border: 1px solid #ddd;">${formatDate(service.service_date)}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${service.scooter?.id || ''}</td>
+      <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKm(service.current_km)}</td>
+      <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">${formatKm(service.next_km)}</td>
+      <td style="padding: 8px; border: 1px solid #ddd;">${service.service_details || ''}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <div style="font-family: Arial, sans-serif; padding: 20px;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="font-size: 24px; margin-bottom: 10px;">LA RENTALS</h1>
+        <h2 style="font-size: 20px; margin-bottom: 20px;">Service History Report</h2>
+        <p style="font-size: 14px; margin-bottom: 5px;">Category: ${categoryName}</p>
+        <p style="font-size: 14px;">Period: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}</p>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+        <thead>
+          <tr style="background-color: #2980b9; color: white;">
+            <th style="padding: 10px; border: 1px solid #ddd;">Date</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Vehicle ID</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Current KM</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Next Service</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Service Details</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows}
+        </tbody>
+      </table>
+
+      <div style="margin-bottom: 30px;">
+        <h3 style="font-size: 16px; margin-bottom: 10px;">Summary</h3>
+        <p style="font-size: 14px; margin-bottom: 5px;">Total Services: ${services.length}</p>
+        <p style="font-size: 14px;">Generated on: ${new Date().toLocaleDateString('en-GB', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })}</p>
+      </div>
+
+      <div style="text-align: center; color: #666; font-size: 12px;">
+        <p>Developed & Powered by Umanav Apti LTD.</p>
+      </div>
+    </div>
+  `;
 };
 
 /**
- * Adds page number to each page
- */
-const addPageNumbers = (doc) => {
-  const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(9);
-    doc.setTextColor(128);
-    addCenteredText(doc, `Page ${i} of ${pageCount}`, doc.internal.pageSize.height - 10);
-  }
-};
-
-/**
- * Adds header to PDF
- */
-const addHeader = (doc, { categoryName, dateRange }) => {
-  // Title
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  addCenteredText(doc, 'LA RENTALS', 20);
-  
-  doc.setFontSize(16);
-  addCenteredText(doc, 'Service History Report', 30);
-
-  // Category and Date Range
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`Category: ${categoryName}`, 15, 45);
-  doc.text(`Period: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`, 15, 52);
-};
-
-/**
- * Adds summary section to PDF
- */
-const addSummary = (doc, { services }, finalY) => {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Summary', 15, finalY + 20);
-  
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(`Total Services: ${services.length}`, 15, finalY + 30);
-  doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })}`, 15, finalY + 37);
-};
-
-/**
- * Adds footer to PDF
- */
-const addFooter = (doc) => {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(128);
-  addCenteredText(doc, 'Developed & Powered by Umanav Apti LTD.', doc.internal.pageSize.height - 18);
-};
-
-/**
- * Main function to generate PDF report
+ * Generate PDF report
  */
 export const generateServiceReport = async ({ categoryName, dateRange, services }) => {
   try {
-    // Initialize PDF
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
+    const element = document.createElement('div');
+    element.innerHTML = createPDFTemplate({ categoryName, dateRange, services });
+    document.body.appendChild(element);
 
-    // Add header
-    addHeader(doc, { categoryName, dateRange });
+    const opt = {
+      margin: 10,
+      filename: `${categoryName}_Service_History_${formatDate(new Date())}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
 
-    // Prepare table data
-    const tableData = services.map(service => [
-      formatDate(service.service_date),
-      service.scooter?.id || '',
-      formatKm(service.current_km),
-      formatKm(service.next_km),
-      service.service_details || ''
-    ]);
-
-    // Add table
-    doc.autoTable({
-      startY: 60,
-      head: [['Date', 'Vehicle ID', 'Current KM', 'Next Service', 'Service Details']],
-      body: tableData,
-      styles: {
-        fontSize: 9,
-        cellPadding: 3,
-      },
-      headStyles: {
-        fillColor: [41, 128, 185],
-        textColor: 255,
-        fontSize: 10,
-        fontStyle: 'bold',
-        halign: 'center'
-      },
-      columnStyles: {
-        0: { cellWidth: 25 },  // Date
-        1: { cellWidth: 25 },  // Vehicle ID
-        2: { cellWidth: 25, halign: 'right' },  // Current KM
-        3: { cellWidth: 25, halign: 'right' },  // Next Service
-        4: { cellWidth: 'auto' }  // Service Details
-      },
-      didDrawPage: () => {
-        // Add footer to each page
-        addFooter(doc);
-      }
-    });
-
-    // Add summary after table
-    const finalY = doc.lastAutoTable.finalY || 60;
-    addSummary(doc, { services }, finalY);
-
-    // Add page numbers
-    addPageNumbers(doc);
-
-    // Save PDF
-    const filename = `${categoryName}_Service_History_${formatDate(new Date())}.pdf`;
-    doc.save(filename);
-
+    await html2pdf().from(element).set(opt).save();
+    document.body.removeChild(element);
     return true;
   } catch (error) {
     console.error('Error generating PDF:', error);
@@ -145,6 +84,9 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
   }
 };
 
+/**
+ * Test function
+ */
 export const testPDFGeneration = async () => {
   const testData = {
     categoryName: 'Test Category',
