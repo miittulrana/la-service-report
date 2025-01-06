@@ -5,8 +5,8 @@ const config = {
     namespace: '1cd17d45-f759-4981-8af7-60d8f6ec8d85',
     templateName: 'LA Rentals Service Update',
     numbers: {
-        primary: '+35677106319',   // Primary number - gets ALL notifications
-        bolt: '+35699110797'       // Bolt number - gets only Bolt notifications
+        primary: '+35699307229',   // Primary number - gets ALL notifications
+        bolt: '+35699307229'       // Bolt number - gets only Bolt notifications
     }
 };
 
