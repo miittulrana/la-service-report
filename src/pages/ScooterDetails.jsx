@@ -4,11 +4,12 @@ import { supabase } from '../lib/supabase';
 import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
-import { calculateNextServiceKm, formatCcType } from '../lib/utils';
+import { calculateNextServiceKm, formatDate, formatKm } from '../lib/utils';
 import ExcelImport from '../components/ui/ExcelImport';
 import { Modal } from '../components/ui/Modal';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { generateServiceReport } from '../lib/pdfUtils';
+import { sendServiceNotification } from '../lib/messagebird';
 import "react-datepicker/dist/react-datepicker.css";
 
 function ScooterDetails() {
@@ -28,6 +29,7 @@ function ScooterDetails() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [notificationStatus, setNotificationStatus] = useState(null);
 
   // New service form state
   const [newService, setNewService] = useState({
@@ -43,7 +45,10 @@ function ScooterDetails() {
 
       const { data: scooterData, error: scooterError } = await supabase
         .from('scooters')
-        .select('*, category:categories(*)')
+        .select(`
+          *,
+          category:categories(*)
+        `)
         .eq('id', id)
         .single();
 
@@ -71,14 +76,15 @@ function ScooterDetails() {
     fetchScooterDetails();
   }, [id]);
 
-  // Handle adding new service
+  // Handle adding new service with WhatsApp notification
   const handleAddService = async (e) => {
     e.preventDefault();
     try {
       const currentKm = parseInt(newService.current_km);
       const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
 
-      const { error } = await supabase
+      // First, save to database
+      const { data: serviceData, error } = await supabase
         .from('services')
         .insert([{
           scooter_id: id,
@@ -86,7 +92,9 @@ function ScooterDetails() {
           current_km: currentKm,
           next_km: nextKm,
           service_details: newService.service_details
-        }]);
+        }])
+        .select()
+        .single();
 
       if (error) throw error;
 
@@ -96,6 +104,32 @@ function ScooterDetails() {
         .update({ status: 'active' })
         .eq('id', id);
 
+      // Send WhatsApp notification
+      try {
+        const notificationSent = await sendServiceNotification({
+          date: newService.service_date,
+          scooterId: id,
+          currentKm: currentKm,
+          nextKm: nextKm,
+          serviceDetails: newService.service_details,
+          category: scooter.category?.name
+        });
+
+        setNotificationStatus({
+          success: notificationSent,
+          message: notificationSent 
+            ? 'Service added and notification sent'
+            : 'Service added but notification failed'
+        });
+      } catch (notificationError) {
+        console.error('Notification error:', notificationError);
+        setNotificationStatus({
+          success: false,
+          message: 'Service added but notification failed'
+        });
+      }
+
+      // Reset form and refresh
       setNewService({
         current_km: '',
         service_details: '',
@@ -103,6 +137,7 @@ function ScooterDetails() {
       });
       setShowAddService(false);
       fetchScooterDetails();
+
     } catch (error) {
       console.error('Error:', error);
       alert('Error adding service');
@@ -265,7 +300,7 @@ function ScooterDetails() {
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold">{scooter.id}</h1>
               <span className="text-lg text-gray-500">
-                ({formatCcType(scooter.cc_type)})
+                ({scooter.cc_type})
               </span>
             </div>
             <p className="text-gray-600 text-lg">{scooter.category?.name}</p>
@@ -326,28 +361,37 @@ function ScooterDetails() {
             </button>
           </div>
         </div>
+
+        {/* Notification Status */}
+        {notificationStatus && (
+          <div className={`mt-4 p-4 rounded-lg ${
+            notificationStatus.success ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
+          }`}>
+            {notificationStatus.message}
+          </div>
+        )}
       </div>
 
       {/* Damage Note Section */}
       <div className="mb-8 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
         <DamageNote 
-          scooterId={scooter.id} 
+          scooterId={scooter.id}
           scooterCcType={scooter.cc_type}
         />
       </div>
 
-      {/* Service History */}
-      <div className="space-y-4">
+{/* Service History */}
+<div className="space-y-4">
         {services.map((service) => (
           <div key={service.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="p-4">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="font-bold text-lg">
-                    {new Date(service.service_date).toLocaleDateString()}
+                    {formatDate(service.service_date)}
                   </p>
                   <p className="text-gray-600 mt-1">
-                    {service.current_km.toLocaleString()} km → {service.next_km.toLocaleString()} km
+                    {formatKm(service.current_km)} km → {formatKm(service.next_km)} km
                   </p>
                 </div>
                 <button
@@ -479,7 +523,7 @@ function ScooterDetails() {
           <p className="text-gray-600 mb-6">
             Are you sure you want to delete this service record? 
             <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">Date: {serviceToDelete && new Date(serviceToDelete.service_date).toLocaleDateString()}</p>
+              <p className="font-medium">Date: {serviceToDelete && formatDate(serviceToDelete.service_date)}</p>
               <p className="mt-1">Service Details: {serviceToDelete?.service_details}</p>
             </div>
           </p>
