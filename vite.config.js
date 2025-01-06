@@ -4,15 +4,21 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: 'dist',
+    rollupOptions: {
+      external: ['jspdf', 'jspdf-autotable'],
+      output: {
+        globals: {
+          jspdf: 'jsPDF',
+          'jspdf-autotable': 'jspdf-autotable'
+        }
+      }
+    },
     commonjsOptions: {
       include: [/node_modules/],
       transformMixedEsModules: true
     }
   },
-  resolve: {
-    alias: {
-      'html2pdf.js': 'html2pdf.js/dist/html2pdf.min.js'
-    }
+  optimizeDeps: {
+    include: ['jspdf', 'jspdf-autotable']
   }
 });

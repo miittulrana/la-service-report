@@ -1,6 +1,5 @@
 import { jsPDF } from 'jspdf';
-import 'jspdf-autotable';
-import { formatDate, formatKm } from './utils';
+import autoTable from 'jspdf-autotable';
 
 /**
  * Adds centered text to PDF
@@ -32,7 +31,7 @@ const addHeader = (doc, { categoryName, dateRange }) => {
   // Company Logo/Name
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(24);
-  doc.setTextColor(41, 128, 185); // Blue color
+  doc.setTextColor(41, 128, 185);
   addCenteredText(doc, 'LA RENTALS', 20);
   
   // Report Title
@@ -84,6 +83,13 @@ const addFooter = (doc) => {
  */
 export const generateServiceReport = async ({ categoryName, dateRange, services }) => {
   try {
+    const validServices = services.filter(service => 
+      service && service.service_date && service.scooter
+    );
+
+    // Sort services by date (newest first)
+    validServices.sort((a, b) => new Date(b.service_date) - new Date(a.service_date));
+
     // Initialize PDF
     const doc = new jsPDF({
       orientation: 'portrait',
@@ -94,14 +100,6 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
     // Add header
     addHeader(doc, { categoryName, dateRange });
 
-    // Filter out any undefined or invalid services
-    const validServices = services.filter(service => 
-      service && service.service_date && service.scooter
-    );
-
-    // Sort services by date (newest first)
-    validServices.sort((a, b) => new Date(b.service_date) - new Date(a.service_date));
-
     // Prepare table data
     const tableData = validServices.map(service => [
       formatDate(service.service_date),
@@ -111,7 +109,7 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
       service.service_details || ''
     ]);
 
-    // Add table with styling
+    // Add table
     doc.autoTable({
       startY: 60,
       head: [['Date', 'Vehicle ID', 'Current KM', 'Next Service', 'Service Details']],
@@ -129,17 +127,16 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
         halign: 'center'
       },
       columnStyles: {
-        0: { cellWidth: 25 },  // Date
-        1: { cellWidth: 25 },  // Vehicle ID
-        2: { cellWidth: 25, halign: 'right' },  // Current KM
-        3: { cellWidth: 25, halign: 'right' },  // Next Service
-        4: { cellWidth: 'auto' }  // Service Details
+        0: { cellWidth: 25 },
+        1: { cellWidth: 25 },
+        2: { cellWidth: 25, halign: 'right' },
+        3: { cellWidth: 25, halign: 'right' },
+        4: { cellWidth: 'auto' }
       },
       alternateRowStyles: {
         fillColor: [245, 247, 250]
       },
       didDrawPage: function(data) {
-        // Add footer to each page
         addFooter(doc);
       }
     });
