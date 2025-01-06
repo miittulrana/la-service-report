@@ -76,73 +76,68 @@ function ScooterDetails() {
     fetchScooterDetails();
   }, [id]);
 
-  // Handle adding new service with WhatsApp notification
-  const handleAddService = async (e) => {
-    e.preventDefault();
-    try {
-      const currentKm = parseInt(newService.current_km);
-      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
+// Handle adding new service with WhatsApp notification
+const handleAddService = async (e) => {
+  e.preventDefault();
+  try {
+    const currentKm = parseInt(newService.current_km);
+    const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
 
-      // First, save to database
-      const { data: serviceData, error } = await supabase
-        .from('services')
-        .insert([{
-          scooter_id: id,
-          service_date: newService.service_date,
-          current_km: currentKm,
-          next_km: nextKm,
-          service_details: newService.service_details
-        }])
-        .select()
-        .single();
+    // First, save to database
+    const { data: serviceData, error } = await supabase
+      .from('services')
+      .insert([{
+        scooter_id: id,
+        service_date: newService.service_date,
+        current_km: currentKm,
+        next_km: nextKm,
+        service_details: newService.service_details
+      }])
+      .select()
+      .single();
 
-      if (error) throw error;
+    if (error) throw error;
 
-      // Update scooter status
-      await supabase
-        .from('scooters')
-        .update({ status: 'active' })
-        .eq('id', id);
+    // Update scooter status
+    await supabase
+      .from('scooters')
+      .update({ status: 'active' })
+      .eq('id', id);
 
-      // Send WhatsApp notification
-      try {
-        const notificationSent = await sendServiceNotification({
-          date: newService.service_date,
-          scooterId: id,
-          currentKm: currentKm,
-          nextKm: nextKm,
-          serviceDetails: newService.service_details,
-          category: scooter.category?.name
-        });
+    // Send WhatsApp notification
+    const notificationSent = await sendServiceNotification({
+      date: newService.service_date,
+      scooterId: id,
+      currentKm: currentKm,
+      nextKm: nextKm,
+      serviceDetails: newService.service_details.trim(),
+      category: scooter.category?.name || ''
+    });
 
-        setNotificationStatus({
-          success: notificationSent,
-          message: notificationSent 
-            ? 'Service added and notification sent'
-            : 'Service added but notification failed'
-        });
-      } catch (notificationError) {
-        console.error('Notification error:', notificationError);
-        setNotificationStatus({
-          success: false,
-          message: 'Service added but notification failed'
-        });
-      }
+    setNotificationStatus({
+      success: notificationSent,
+      message: notificationSent 
+        ? 'Service added and notification sent successfully'
+        : 'Service added but WhatsApp notification failed'
+    });
 
-      // Reset form and refresh
-      setNewService({
-        current_km: '',
-        service_details: '',
-        service_date: new Date().toISOString().split('T')[0]
-      });
-      setShowAddService(false);
-      await fetchScooterDetails();
+    // Reset form and refresh
+    setNewService({
+      current_km: '',
+      service_details: '',
+      service_date: new Date().toISOString().split('T')[0]
+    });
+    setShowAddService(false);
+    await fetchScooterDetails();
 
-    } catch (error) {
-      console.error('Error:', error);
-      alert('Error adding service');
-    }
-  };
+  } catch (error) {
+    console.error('Error adding service:', error);
+    setNotificationStatus({
+      success: false,
+      message: 'Error: Failed to add service'
+    });
+  }
+};
 
   // Handle deleting individual service
   const handleDeleteService = async (serviceId) => {

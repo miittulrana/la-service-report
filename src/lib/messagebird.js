@@ -1,4 +1,6 @@
-// Configuration
+/**
+ * Configuration for MessageBird
+ */
 const config = {
     apiKey: 'ZtmGp69YV8Nlr5Etr6Ji9RXPtyMrIdaRnvvL',
     channelId: '472631b5-19e3-5825-96ae-0647959b8f97',
@@ -15,8 +17,8 @@ const config = {
  */
 const formatServiceDetails = (details) => {
     return details.trim()
-        .replace(/\s+/g, ' ')
-        .substring(0, 200);
+        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+        .substring(0, 200);    // Limit length for WhatsApp
 };
 
 /**
@@ -36,9 +38,43 @@ const formatMessageDate = (date) => {
 };
 
 /**
- * Send message to MessageBird API
+ * Create message payload for MessageBird API
  */
-const sendMessage = async (messageParams, toNumber) => {
+const createMessagePayload = ({
+    date,
+    scooterId,
+    currentKm,
+    nextKm,
+    serviceDetails
+}) => ({
+    channelId: config.channelId,
+    type: 'hsm',
+    content: {
+        hsm: {
+            namespace: config.namespace,
+            templateName: config.templateName,
+            language: {
+                code: 'en',
+                policy: 'deterministic'
+            },
+            components: [{
+                type: 'body',
+                parameters: [
+                    { type: 'text', text: formatMessageDate(date) },
+                    { type: 'text', text: scooterId },
+                    { type: 'text', text: currentKm.toLocaleString() },
+                    { type: 'text', text: nextKm.toLocaleString() },
+                    { type: 'text', text: formatServiceDetails(serviceDetails) }
+                ]
+            }]
+        }
+    }
+});
+
+/**
+ * Send message using MessageBird API
+ */
+const sendMessage = async (messagePayload, toNumber) => {
     try {
         const response = await fetch('https://conversations.messagebird.com/v1/send', {
             method: 'POST',
@@ -47,13 +83,14 @@ const sendMessage = async (messageParams, toNumber) => {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                ...messageParams,
+                ...messagePayload,
                 to: toNumber
             })
         });
 
         if (!response.ok) {
-            throw new Error(`MessageBird API error: ${response.status}`);
+            const errorData = await response.json();
+            throw new Error(errorData.errors?.[0]?.description || 'Failed to send message');
         }
 
         return true;
@@ -75,50 +112,62 @@ export const sendServiceNotification = async ({
     category
 }) => {
     try {
+        // Validate required parameters
         if (!date || !scooterId || !currentKm || !nextKm || !serviceDetails) {
-            throw new Error('Missing required parameters');
+            throw new Error('Missing required parameters for notification');
         }
 
-        const messageParams = {
-            channelId: config.channelId,
-            type: 'hsm',
-            content: {
-                hsm: {
-                    namespace: config.namespace,
-                    templateName: config.templateName,
-                    language: {
-                        code: 'en',
-                        policy: 'deterministic'
-                    },
-                    components: [{
-                        type: 'body',
-                        parameters: [
-                            { type: 'text', text: formatMessageDate(date) },
-                            { type: 'text', text: scooterId },
-                            { type: 'text', text: currentKm.toLocaleString() },
-                            { type: 'text', text: nextKm.toLocaleString() },
-                            { type: 'text', text: formatServiceDetails(serviceDetails) }
-                        ]
-                    }]
-                }
-            }
-        };
+        const messagePayload = createMessagePayload({
+            date,
+            scooterId,
+            currentKm,
+            nextKm,
+            serviceDetails
+        });
 
-        // Send to primary number
-        await sendMessage(messageParams, config.numbers.primary);
+        // Always send to primary number
+        const primarySent = await sendMessage(messagePayload, config.numbers.primary);
 
         // If it's a Bolt scooter, also send to Bolt number
+        let boltSent = true;
         if (category?.toLowerCase().includes('bolt')) {
-            await sendMessage(messageParams, config.numbers.bolt);
+            boltSent = await sendMessage(messagePayload, config.numbers.bolt);
         }
 
-        return true;
+        return primarySent && boltSent;
     } catch (error) {
         console.error('Error in sendServiceNotification:', error);
         return false;
     }
 };
 
+// Export for testing purposes
+export const testWhatsAppIntegration = async () => {
+    try {
+        const testMessage = {
+            date: new Date(),
+            scooterId: 'TEST123',
+            currentKm: 1000,
+            nextKm: 2000,
+            serviceDetails: 'Test service notification',
+            category: 'test'
+        };
+
+        const result = await sendServiceNotification(testMessage);
+        return {
+            success: result,
+            message: 'Test notification processed successfully'
+        };
+    } catch (error) {
+        console.error('WhatsApp integration test failed:', error);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+};
+
 export default {
-    sendServiceNotification
+    sendServiceNotification,
+    testWhatsAppIntegration
 };
