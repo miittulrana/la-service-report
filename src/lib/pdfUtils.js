@@ -71,11 +71,7 @@ const addFooter = (doc) => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(128);
-  addCenteredText(
-    doc, 
-    'Developed & Powered by Umanav Apti LTD.', 
-    doc.internal.pageSize.height - 18
-  );
+  addCenteredText(doc, 'Developed & Powered by Umanav Apti LTD.', doc.internal.pageSize.height - 18);
 };
 
 /**
@@ -125,7 +121,7 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
         3: { cellWidth: 25, halign: 'right' },  // Next Service
         4: { cellWidth: 'auto' }  // Service Details
       },
-      didDrawPage: function(data) {
+      didDrawPage: () => {
         // Add footer to each page
         addFooter(doc);
       }
@@ -149,19 +145,16 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
   }
 };
 
-/**
- * Test function to verify PDF generation
- */
 export const testPDFGeneration = async () => {
   const testData = {
     categoryName: 'Test Category',
     dateRange: {
-      startDate: new Date('2024-01-01'),
-      endDate: new Date('2024-12-31')
+      startDate: new Date(),
+      endDate: new Date()
     },
     services: [
       {
-        service_date: '2024-01-15',
+        service_date: new Date().toISOString(),
         scooter: { id: 'TEST001' },
         current_km: 5000,
         next_km: 8000,
