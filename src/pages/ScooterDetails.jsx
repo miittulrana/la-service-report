@@ -136,7 +136,7 @@ function ScooterDetails() {
         service_date: new Date().toISOString().split('T')[0]
       });
       setShowAddService(false);
-      fetchScooterDetails();
+      await fetchScooterDetails();
 
     } catch (error) {
       console.error('Error:', error);
@@ -374,10 +374,7 @@ function ScooterDetails() {
 
       {/* Damage Note Section */}
       <div className="mb-8 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-        <DamageNote 
-          scooterId={scooter.id}
-          scooterCcType={scooter.cc_type}
-        />
+        <DamageNote scooterId={scooter.id} />
       </div>
 
 {/* Service History */}
