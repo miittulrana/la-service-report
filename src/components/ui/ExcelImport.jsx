@@ -13,49 +13,12 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
 
   const formatDate = (dateString) => {
     try {
-      // Remove any leading/trailing spaces
-      dateString = dateString.trim();
-      
-      // Handle both formats: "01-Dec-23" and "01-Dec-2023"
-      const [day, month, yearPart] = dateString.split('-');
-      
-      const months = {
-        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04', 
-        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08', 
-        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-      };
-
-      // Convert year to 4 digits if necessary
-      let fullYear = yearPart;
-      if (yearPart.length === 2) {
-        fullYear = parseInt(yearPart) + 2000;
-      } else if (yearPart.length === 4) {
-        fullYear = yearPart;
-      } else {
-        throw new Error('Invalid year format');
-      }
-
-      // Validate month
-      if (!months[month]) {
-        throw new Error('Invalid month');
-      }
-
-      // Validate day
-      const paddedDay = day.padStart(2, '0');
-      if (parseInt(paddedDay) < 1 || parseInt(paddedDay) > 31) {
-        throw new Error('Invalid day');
-      }
-
-      // Format as YYYY-MM-DD
-      const formattedDate = `${fullYear}-${months[month]}-${paddedDay}`;
-      
-      // Final validation
-      const testDate = new Date(formattedDate);
-      if (isNaN(testDate.getTime())) {
+      // Format from YYYY-MM-DD to YYYY-MM-DD
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
         throw new Error('Invalid date');
       }
-
-      return formattedDate;
+      return dateString.split('T')[0]; // Remove time part if exists
     } catch (error) {
       console.error('Date parsing error:', { error, dateString });
       throw new Error(`Invalid date format: ${dateString}`);
@@ -72,42 +35,53 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
 
       const data = await file.arrayBuffer();
       const workbook = XLSX.read(data, {
-        cellDates: false,
-        cellNF: true,
-        cellText: true
+        cellDates: true,
+        dateNF: 'yyyy-mm-dd'
       });
 
       const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { 
-        header: ['service_date', 'current_km', 'next_km', 'service_details'],
+      
+      // Get row data starting from row 2 (skip header)
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, {
         range: 1  // Skip header row
       });
 
+      console.log('Parsed Excel Data:', jsonData); // Debug log
+
       // Format data for database
-      const serviceRecords = jsonData.map(record => {
-        if (!record.service_date || !record.current_km || !record.next_km) {
-          throw new Error('Missing required fields in row');
-        }
+      const serviceRecords = jsonData
+        .filter(row => {
+          return row['MILAGE'] !== undefined && 
+                 row['EXT SERVICE'] !== undefined && 
+                 row['SERVICE DATE'] !== undefined;
+        })
+        .map(row => {
+          console.log('Processing row:', row); // Debug log
 
-        // Basic validation for numbers
-        const currentKm = parseInt(record.current_km);
-        const nextKm = parseInt(record.next_km);
-        
-        if (isNaN(currentKm) || isNaN(nextKm)) {
-          throw new Error('Invalid kilometer values');
-        }
+          const currentKm = parseInt(row['MILAGE']);
+          const nextKm = parseInt(row['EXT SERVICE']);
+          const serviceDate = row['SERVICE DATE'];
+          const workDone = row['DONE'] || '';
 
-        return {
-          scooter_id: scooterId,
-          service_date: formatDate(record.service_date),
-          current_km: currentKm,
-          next_km: nextKm,
-          service_details: record.service_details || ''
-        };
-      });
+          if (isNaN(currentKm) || isNaN(nextKm)) {
+            console.log('Invalid KM values:', { current: currentKm, next: nextKm });
+            throw new Error('Invalid kilometer values in Excel');
+          }
 
-      // Sort records by date (oldest first)
-      serviceRecords.sort((a, b) => new Date(a.service_date) - new Date(b.service_date));
+          return {
+            scooter_id: scooterId,
+            service_date: formatDate(serviceDate),
+            current_km: currentKm,
+            next_km: nextKm,
+            service_details: workDone
+          };
+        });
+
+      console.log('Processed Records:', serviceRecords); // Debug log
+
+      if (serviceRecords.length === 0) {
+        throw new Error('No valid records found in Excel file');
+      }
 
       const { error } = await supabase
         .from('services')
@@ -118,10 +92,10 @@ const ExcelImport = ({ scooterId, onImportComplete }) => {
       setImportStatus('success');
       setImportDetails({
         totalRecords: serviceRecords.length,
-        dateRange: serviceRecords.length > 0 ? {
-          first: new Date(serviceRecords[0].service_date).toLocaleDateString(),
-          last: new Date(serviceRecords[serviceRecords.length - 1].service_date).toLocaleDateString()
-        } : null
+        dateRange: {
+          first: new Date(serviceRecords[serviceRecords.length-1].service_date).toLocaleDateString(),
+          last: new Date(serviceRecords[0].service_date).toLocaleDateString()
+        }
       });
 
       if (onImportComplete) {
