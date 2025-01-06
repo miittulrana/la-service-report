@@ -1,16 +1,40 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { X, Calendar, FileDown } from 'lucide-react';
+import { X, Calendar, FileDown, AlertCircle } from 'lucide-react';
 import CustomDatePicker from './CustomDatePicker';
 
-const DateRangePicker = ({ isOpen, onClose, onExport, isLoading, categoryName }) => {
+const DateRangePicker = ({ 
+  isOpen, 
+  onClose, 
+  onExport, 
+  isLoading, 
+  categoryName,
+  error 
+}) => {
   const [dateRange, setDateRange] = useState({
-    startDate: new Date(),
+    startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)), // Default to last month
     endDate: new Date()
   });
 
+  // Reset dates when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setDateRange({
+        startDate: new Date(new Date().setMonth(new Date().getMonth() - 1)),
+        endDate: new Date()
+      });
+    }
+  }, [isOpen]);
+
   const handleExport = (e) => {
     e.preventDefault();
+    
+    // Validate date range
+    if (dateRange.endDate < dateRange.startDate) {
+      alert('End date cannot be before start date');
+      return;
+    }
+
     onExport(
       dateRange.startDate.toISOString().split('T')[0],
       dateRange.endDate.toISOString().split('T')[0]
@@ -48,6 +72,7 @@ const DateRangePicker = ({ isOpen, onClose, onExport, isLoading, categoryName })
                   ...prev,
                   startDate: date
                 }))}
+                maxDate={dateRange.endDate}
               />
             </div>
             <div>
@@ -58,6 +83,8 @@ const DateRangePicker = ({ isOpen, onClose, onExport, isLoading, categoryName })
                   ...prev,
                   endDate: date
                 }))}
+                minDate={dateRange.startDate}
+                maxDate={new Date()}
               />
             </div>
           </div>
@@ -70,6 +97,15 @@ const DateRangePicker = ({ isOpen, onClose, onExport, isLoading, categoryName })
               </p>
             </div>
           </div>
+
+          {error && (
+            <div className="bg-red-50 p-4 rounded-lg">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-red-500 mt-0.5" />
+                <p className="text-sm text-red-700">{error}</p>
+              </div>
+            </div>
+          )}
 
           <div className="flex justify-end gap-3 border-t pt-4">
             <button
@@ -110,7 +146,8 @@ DateRangePicker.propTypes = {
   onClose: PropTypes.func.isRequired,
   onExport: PropTypes.func.isRequired,
   isLoading: PropTypes.bool.isRequired,
-  categoryName: PropTypes.string.isRequired
+  categoryName: PropTypes.string.isRequired,
+  error: PropTypes.string
 };
 
 export default DateRangePicker;
