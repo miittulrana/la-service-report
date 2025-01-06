@@ -5,10 +5,14 @@ export default defineConfig({
   plugins: [react()],
   build: {
     outDir: 'dist',
-    sourcemap: true
+    commonjsOptions: {
+      include: [/node_modules/],
+      transformMixedEsModules: true
+    }
   },
-  server: {
-    port: 3000,
-    open: true
+  resolve: {
+    alias: {
+      'html2pdf.js': 'html2pdf.js/dist/html2pdf.min.js'
+    }
   }
 });
