@@ -1,15 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown, MessageSquare } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
-import { calculateNextServiceKm, formatDate, formatKm } from '../lib/utils';
+import { calculateNextServiceKm, formatCcType } from '../lib/utils';
 import ExcelImport from '../components/ui/ExcelImport';
-import { Modal, WhatsAppModal } from '../components/ui/Modal';
+import { Modal } from '../components/ui/Modal';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { generateServiceReport } from '../lib/pdfUtils';
-import { sendServiceNotification, resendServiceNotification } from '../lib/messagebird';
 import "react-datepicker/dist/react-datepicker.css";
 
 function ScooterDetails() {
@@ -29,12 +28,6 @@ function ScooterDetails() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
-  const [notificationStatus, setNotificationStatus] = useState(null);
-  
-  // New WhatsApp states
-  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
-  const [selectedService, setSelectedService] = useState(null);
-  const [sendingWhatsApp, setSendingWhatsApp] = useState(false);
 
   // New service form state
   const [newService, setNewService] = useState({
@@ -50,10 +43,7 @@ function ScooterDetails() {
 
       const { data: scooterData, error: scooterError } = await supabase
         .from('scooters')
-        .select(`
-          *,
-          category:categories(*)
-        `)
+        .select('*, category:categories(*)')
         .eq('id', id)
         .single();
 
@@ -81,15 +71,14 @@ function ScooterDetails() {
     fetchScooterDetails();
   }, [id]);
 
-  // Handle adding new service with WhatsApp notification
+  // Handle adding new service
   const handleAddService = async (e) => {
     e.preventDefault();
     try {
       const currentKm = parseInt(newService.current_km);
       const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
 
-      // First, save to database
-      const { data: serviceData, error } = await supabase
+      const { error } = await supabase
         .from('services')
         .insert([{
           scooter_id: id,
@@ -97,9 +86,7 @@ function ScooterDetails() {
           current_km: currentKm,
           next_km: nextKm,
           service_details: newService.service_details
-        }])
-        .select()
-        .single();
+        }]);
 
       if (error) throw error;
 
@@ -109,79 +96,20 @@ function ScooterDetails() {
         .update({ status: 'active' })
         .eq('id', id);
 
-      // Send WhatsApp notification
-      const notificationResult = await sendServiceNotification({
-        date: newService.service_date,
-        scooterId: id,
-        currentKm: currentKm,
-        nextKm: nextKm,
-        serviceDetails: newService.service_details.trim(),
-        category: scooter.category?.name
-      });
-
-      setNotificationStatus({
-        success: notificationResult.success,
-        message: notificationResult.success 
-          ? 'Service added and notification sent successfully'
-          : `Service added but WhatsApp notification failed: ${notificationResult.error}`
-      });
-
-      // Reset form and refresh
       setNewService({
         current_km: '',
         service_details: '',
         service_date: new Date().toISOString().split('T')[0]
       });
       setShowAddService(false);
-      await fetchScooterDetails();
-
+      fetchScooterDetails();
     } catch (error) {
-      console.error('Error adding service:', error);
-      setNotificationStatus({
-        success: false,
-        message: 'Error: Failed to add service'
-      });
+      console.error('Error:', error);
+      alert('Error adding service');
     }
   };
 
-  // Handle WhatsApp resend
-  const handleWhatsAppClick = (service) => {
-    setSelectedService(service);
-    setShowWhatsAppModal(true);
-  };
-
-  // Handle WhatsApp send
-  const handleWhatsAppSend = async (numberType) => {
-    try {
-      setSendingWhatsApp(true);
-      
-      const result = await resendServiceNotification({
-        date: selectedService.service_date,
-        scooterId: id,
-        currentKm: selectedService.current_km,
-        nextKm: selectedService.next_km,
-        serviceDetails: selectedService.service_details
-      }, numberType);
-
-      setNotificationStatus({
-        success: result.success,
-        message: result.success 
-          ? `Notification resent to ${numberType} number successfully`
-          : `Failed to resend notification: ${result.error}`
-      });
-    } catch (error) {
-      console.error('WhatsApp send error:', error);
-      setNotificationStatus({
-        success: false,
-        message: 'Failed to send WhatsApp notification'
-      });
-    } finally {
-      setSendingWhatsApp(false);
-      setShowWhatsAppModal(false);
-      setSelectedService(null);
-    }
-  };
-
+  // Handle deleting individual service
   const handleDeleteService = async (serviceId) => {
     try {
       setIsDeleting(true);
@@ -202,13 +130,18 @@ function ScooterDetails() {
     }
   };
 
+  // Handle deleting scooter
   const handleDeleteScooter = async () => {
     try {
       setIsDeleting(true);
       
+      // Delete services first
       await supabase.from('services').delete().eq('scooter_id', id);
+      
+      // Delete damages
       await supabase.from('damages').delete().eq('scooter_id', id);
       
+      // Finally delete scooter
       const { error } = await supabase
         .from('scooters')
         .delete()
@@ -224,6 +157,7 @@ function ScooterDetails() {
     }
   };
 
+  // Toggle scooter status
   const toggleStatus = async () => {
     try {
       setUpdating(true);
@@ -248,6 +182,7 @@ function ScooterDetails() {
     }
   };
 
+  // Handle export
   const handleExport = async (startDate, endDate) => {
     try {
       setIsExporting(true);
@@ -330,7 +265,7 @@ function ScooterDetails() {
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold">{scooter.id}</h1>
               <span className="text-lg text-gray-500">
-                ({scooter.cc_type})
+                ({formatCcType(scooter.cc_type)})
               </span>
             </div>
             <p className="text-gray-600 text-lg">{scooter.category?.name}</p>
@@ -391,54 +326,39 @@ function ScooterDetails() {
             </button>
           </div>
         </div>
-
-        {/* Notification Status */}
-        {notificationStatus && (
-          <div className={`mt-4 p-4 rounded-lg ${
-            notificationStatus.success ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
-          }`}>
-            {notificationStatus.message}
-          </div>
-        )}
       </div>
 
       {/* Damage Note Section */}
       <div className="mb-8 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-        <DamageNote scooterId={scooter.id} />
+        <DamageNote 
+          scooterId={scooter.id} 
+          scooterCcType={scooter.cc_type}
+        />
       </div>
 
-{/* Service History */}
-<div className="space-y-4">
+      {/* Service History */}
+      <div className="space-y-4">
         {services.map((service) => (
           <div key={service.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
             <div className="p-4">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <p className="font-bold text-lg">
-                    {formatDate(service.service_date)}
+                    {new Date(service.service_date).toLocaleDateString()}
                   </p>
                   <p className="text-gray-600 mt-1">
-                    {formatKm(service.current_km)} km → {formatKm(service.next_km)} km
+                    {service.current_km.toLocaleString()} km → {service.next_km.toLocaleString()} km
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleWhatsAppClick(service)}
-                    className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                    title="Resend WhatsApp Notification"
-                  >
-                    <MessageSquare className="h-5 w-5" />
-                  </button>
-                  <button
-                    onClick={() => {
-                      setServiceToDelete(service);
-                      setShowDeleteServiceModal(true);
-                    }}
-                    className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="h-5 w-5" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => {
+                    setServiceToDelete(service);
+                    setShowDeleteServiceModal(true);
+                  }}
+                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <Trash2 className="h-5 w-5" />
+                </button>
               </div>
 
               <div className="mt-4 pt-4 border-t">
@@ -559,7 +479,7 @@ function ScooterDetails() {
           <p className="text-gray-600 mb-6">
             Are you sure you want to delete this service record? 
             <div className="mt-2 p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">Date: {serviceToDelete && formatDate(serviceToDelete.service_date)}</p>
+              <p className="font-medium">Date: {serviceToDelete && new Date(serviceToDelete.service_date).toLocaleDateString()}</p>
               <p className="mt-1">Service Details: {serviceToDelete?.service_details}</p>
             </div>
           </p>
@@ -654,18 +574,6 @@ function ScooterDetails() {
         onExport={handleExport}
         isLoading={isExporting}
         categoryName={scooter.category?.name}
-      />
-
-      {/* WhatsApp Modal */}
-      <WhatsAppModal
-        isOpen={showWhatsAppModal}
-        onClose={() => {
-          setShowWhatsAppModal(false);
-          setSelectedService(null);
-        }}
-        onSend={handleWhatsAppSend}
-        category={scooter?.category?.name}
-        isLoading={sendingWhatsApp}
       />
     </div>
   );

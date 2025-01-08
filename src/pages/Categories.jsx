@@ -31,7 +31,7 @@ function Categories() {
   useEffect(() => {
     const handleScroll = () => {
       const scrollPosition = window.scrollY;
-      setIsScrolled(scrollPosition > 100);
+      setIsScrolled(scrollPosition > 100); // Change sticky behavior after 100px scroll
     };
 
     window.addEventListener('scroll', handleScroll);
@@ -300,7 +300,7 @@ function Categories() {
                 return (
                   <div
                     key={scooter.id}
-                    onClick={() => navigate(`/scooters/${encodeURIComponent(scooter.id)}`)}
+                    onClick={() => navigate(`/scooters/${scooter.id}`)}
                     className={`flex items-center justify-between p-4 
                              bg-gray-50 rounded-lg hover:shadow-md 
                              transition-all duration-300 cursor-pointer 
@@ -353,8 +353,8 @@ function Categories() {
         ))}
       </div>
 
-{/* Add Scooter Modal */}
-{showAddModal && (
+      {/* Add Scooter Modal */}
+      {showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <div className="flex items-center justify-between mb-4">

@@ -1,53 +1,47 @@
-/**
- * Configuration for MessageBird
- */
+import messagebird from 'messagebird';
+
+// Configuration
 const config = {
     apiKey: 'ZtmGp69YV8Nlr5Etr6Ji9RXPtyMrIdaRnvvL',
-    channelId: '472631b5-19e3-5825-96ae-0647959b8f97',
+    channelId: 'f452b037-09c6-5838-9f3f-d8fd5342cae7',
     namespace: '1cd17d45-f759-4981-8af7-60d8f6ec8d85',
     templateName: 'LA Rentals Service Update',
     numbers: {
-        primary: '+35699307229',   // Primary number - gets ALL notifications
-        bolt: '+35699307229'       // Bolt number - gets only Bolt notifications
+        primary: '+35677106319',   // Primary number - gets ALL notifications
+        bolt: '+35699110797'       // Bolt number - gets only Bolt notifications
     }
 };
 
-/**
- * Format service details for WhatsApp message
- */
-const formatServiceDetails = (details) => {
-    if (!details) return '';
-    return details.trim()
-        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
-        .substring(0, 200);    // Limit length for WhatsApp
-};
+// Initialize MessageBird client with request queue
+const messagebirdClient = messagebird(config.apiKey);
+const messageQueue = [];
+let isProcessingQueue = false;
 
 /**
- * Format date for WhatsApp message
+ * Process message queue in background
  */
-const formatMessageDate = (date) => {
-    try {
-        return new Date(date).toLocaleDateString('en-GB', {
-            day: '2-digit',
-            month: '2-digit',
-            year: 'numeric'
-        });
-    } catch (error) {
-        console.error('Date formatting error:', error);
-        return date?.toString() || '';
+const processMessageQueue = async () => {
+    if (isProcessingQueue || messageQueue.length === 0) return;
+
+    isProcessingQueue = true;
+
+    while (messageQueue.length > 0) {
+        const message = messageQueue.shift();
+        try {
+            await messagebirdClient.conversations.send(message);
+            await new Promise(resolve => setTimeout(resolve, 100)); // Delay between messages
+        } catch (error) {
+            console.error('Failed to send message:', error);
+        }
     }
+
+    isProcessingQueue = false;
 };
 
 /**
- * Create message payload for MessageBird API
+ * Creates WhatsApp message parameters
  */
-const createMessagePayload = ({
-    date,
-    scooterId,
-    currentKm,
-    nextKm,
-    serviceDetails
-}) => ({
+const createMessageParams = ({date, scooterId, currentKm, nextKm}) => ({
     channelId: config.channelId,
     type: 'hsm',
     content: {
@@ -61,11 +55,10 @@ const createMessagePayload = ({
             components: [{
                 type: 'body',
                 parameters: [
-                    { type: 'text', text: formatMessageDate(date) },
+                    { type: 'text', text: date },
                     { type: 'text', text: scooterId },
-                    { type: 'text', text: currentKm?.toLocaleString() || '0' },
-                    { type: 'text', text: nextKm?.toLocaleString() || '0' },
-                    { type: 'text', text: formatServiceDetails(serviceDetails) }
+                    { type: 'text', text: currentKm.toString() },
+                    { type: 'text', text: nextKm.toString() }
                 ]
             }]
         }
@@ -73,60 +66,18 @@ const createMessagePayload = ({
 });
 
 /**
- * Send message using MessageBird API
+ * Queue a message for sending
  */
-const sendMessage = async (messagePayload, toNumber) => {
-    try {
-        const response = await fetch('https://conversations.messagebird.com/v1/send', {
-            method: 'POST',
-            headers: {
-                'Authorization': `AccessKey ${config.apiKey}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                ...messagePayload,
-                to: toNumber
-            })
-        });
+const queueMessage = (messageParams, toNumber) => {
+    messageQueue.push({
+        ...messageParams,
+        to: toNumber
+    });
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.errors?.[0]?.description || 'Failed to send message');
-        }
-
-        return {
-            success: true,
-            error: null
-        };
-    } catch (error) {
-        console.error('Send message error:', error);
-        return {
-            success: false,
-            error: error.message
-        };
+    // Start processing queue if not already processing
+    if (!isProcessingQueue) {
+        setTimeout(processMessageQueue, 0);
     }
-};
-
-/**
- * Send message to primary number
- */
-export const sendToPrimaryNumber = async (serviceData) => {
-    if (!serviceData || !config.numbers.primary) {
-        return { success: false, error: 'Invalid service data or primary number' };
-    }
-    const messagePayload = createMessagePayload(serviceData);
-    return sendMessage(messagePayload, config.numbers.primary);
-};
-
-/**
- * Send message to Bolt number
- */
-export const sendToBoltNumber = async (serviceData) => {
-    if (!serviceData || !config.numbers.bolt) {
-        return { success: false, error: 'Invalid service data or bolt number' };
-    }
-    const messagePayload = createMessagePayload(serviceData);
-    return sendMessage(messagePayload, config.numbers.bolt);
 };
 
 /**
@@ -137,76 +88,33 @@ export const sendServiceNotification = async ({
     scooterId,
     currentKm,
     nextKm,
-    serviceDetails,
     category
 }) => {
     try {
-        // Validate required parameters
-        if (!date || !scooterId || !currentKm || !nextKm || !serviceDetails) {
-            throw new Error('Missing required parameters for notification');
-        }
-
-        const serviceData = {
+        const messageParams = createMessageParams({
             date,
             scooterId,
             currentKm,
-            nextKm,
-            serviceDetails
-        };
+            nextKm
+        });
 
-        // Send to primary number
-        const primaryResult = await sendToPrimaryNumber(serviceData);
+        // Queue message to primary number (for ALL services)
+        queueMessage(messageParams, config.numbers.primary);
 
-        // For Bolt category, also send to Bolt number
-        let boltResult = { success: true };
-        if (category?.toLowerCase().includes('bolt')) {
-            boltResult = await sendToBoltNumber(serviceData);
+        // If it's a Bolt scooter, queue additional notification
+        if (category?.toLowerCase() === 'bolt') {
+            queueMessage(messageParams, config.numbers.bolt);
         }
 
-        return {
-            success: primaryResult.success && boltResult.success,
-            primaryResult,
-            boltResult,
-            error: primaryResult.error || boltResult.error
-        };
+        return true;
     } catch (error) {
         console.error('Error in sendServiceNotification:', error);
-        return {
-            success: false,
-            primaryResult: { success: false },
-            boltResult: { success: false },
-            error: error.message
-        };
+        return false;
     }
 };
 
-/**
- * Resend notification for specific service
- */
-export const resendServiceNotification = async (serviceData, numberType = 'primary') => {
-    try {
-        // Validate service data
-        if (!serviceData?.date || !serviceData?.scooterId) {
-            throw new Error('Invalid service data for resend');
-        }
-
-        if (numberType === 'bolt') {
-            return await sendToBoltNumber(serviceData);
-        }
-        return await sendToPrimaryNumber(serviceData);
-    } catch (error) {
-        console.error('Error resending notification:', error);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
-};
-
-export default {
-    sendServiceNotification,
-    resendServiceNotification,
-    sendToPrimaryNumber,
-    sendToBoltNumber,
-    config
+// Export for testing purposes
+export const testing = {
+    getQueueLength: () => messageQueue.length,
+    clearQueue: () => messageQueue.length = 0
 };
