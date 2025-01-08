@@ -353,8 +353,8 @@ function Categories() {
         ))}
       </div>
 
-      {/* Add Scooter Modal */}
-      {showAddModal && (
+{/* Add Scooter Modal */}
+{showAddModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
             <div className="flex items-center justify-between mb-4">
@@ -387,7 +387,7 @@ function Categories() {
                 />
               </div>
 
-              {selectedCategoryName !== 'Bolt' && (
+              {selectedCategoryName !== 'Bolt' && selectedCategoryName !== 'Private Rental' && (
                 <div>
                   <label className="block text-sm font-medium mb-1">Engine Type</label>
                   <select
@@ -407,6 +407,20 @@ function Categories() {
                   <p className="text-sm text-blue-600">
                     Bolt scooters are automatically set to 125cc BOLT type with 3000km service interval
                   </p>
+                </div>
+              )}
+
+              {selectedCategoryName === 'Private Rental' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Engine Type</label>
+                  <select
+                    value={newScooterCcType}
+                    onChange={(e) => setNewScooterCcType(e.target.value)}
+                    className="w-full p-2 border rounded"
+                    required
+                  >
+                    <option value="125cc">125cc (4000km service interval)</option>
+                  </select>
                 </div>
               )}
 
