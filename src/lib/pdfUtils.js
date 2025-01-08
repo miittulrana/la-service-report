@@ -2,6 +2,12 @@ import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import { formatDate, formatKm } from './utils';
 
+// Constants for PDF layout
+const PAGE_MARGIN = 15;
+const FOOTER_HEIGHT = 35;
+const FOOTER_PADDING = 10;
+const COLUMN_GAP = 15;
+
 /**
  * Adds centered text to PDF
  */
@@ -13,20 +19,127 @@ const addCenteredText = (doc, text, y) => {
 };
 
 /**
- * Adds page number to each page
+ * Adds footer to each page
  */
-const addPageNumbers = (doc) => {
+const addFooter = (doc) => {
+  const pageHeight = doc.internal.pageSize.height;
+  const pageWidth = doc.internal.pageSize.width;
+  
+  // Add line above footer
+  doc.setDrawColor(200, 200, 200);
+  doc.line(PAGE_MARGIN, pageHeight - FOOTER_HEIGHT, pageWidth - PAGE_MARGIN, pageHeight - FOOTER_HEIGHT);
+  
+  // Add footer content
+  doc.setFontSize(8);
+  doc.setTextColor(128);
+  
+  // Company text
+  addCenteredText(doc, 'Developed & Powered by Umanav Apti LTD.', pageHeight - 25);
+  
+  // Page numbers
   const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(9);
-    doc.setTextColor(128);
-    addCenteredText(doc, `Page ${i} of ${pageCount}`, doc.internal.pageSize.height - 10);
-  }
+  addCenteredText(doc, `Page ${doc.getCurrentPageInfo().pageNumber} of ${pageCount}`, pageHeight - 15);
 };
 
 /**
- * Adds header to PDF
+ * Formats damage report text
+ */
+const formatDamageReport = (scooterId, date, description) => {
+  return [
+    `Scooter ${scooterId}`,
+    `Reported on: ${formatDate(date)}`,
+    description
+  ].join('\n');
+};
+
+/**
+ * Calculate space required for a damage report
+ */
+const getDamageReportHeight = (doc, text) => {
+  const lines = doc.splitTextToSize(text, (doc.internal.pageSize.width - (3 * PAGE_MARGIN)) / 2);
+  return lines.length * (doc.internal.getFontSize() / (72 / 25.6)) + 10; // Add some padding
+};
+
+/**
+ * Adds damage reports section in 2-column layout
+ */
+const addDamageReports = (doc, scooters, startY) => {
+  const pageWidth = doc.internal.pageSize.width;
+  const columnWidth = (pageWidth - (3 * PAGE_MARGIN)) / 2;
+  let currentY = startY + 10;
+  let leftColumn = true;
+  let maxColumnHeight = 0;
+
+  // Collect all damages
+  const allDamages = scooters.reduce((damages, scooter) => {
+    if (scooter.damages && scooter.damages.length > 0) {
+      const scooterDamages = scooter.damages.map(damage => ({
+        ...damage,
+        scooterId: scooter.id
+      }));
+      return [...damages, ...scooterDamages];
+    }
+    return damages;
+  }, []);
+
+  // Add section title
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.setTextColor(0);
+  doc.text('Damage Reports', PAGE_MARGIN, currentY);
+  currentY += 10;
+
+  // Process each damage report
+  allDamages.forEach((damage, index) => {
+    const damageText = formatDamageReport(
+      damage.scooterId,
+      damage.created_at,
+      damage.description
+    );
+    
+    const textHeight = getDamageReportHeight(doc, damageText);
+
+    // Check if we need to start a new page
+    if (currentY + textHeight > doc.internal.pageSize.height - FOOTER_HEIGHT - FOOTER_PADDING) {
+      doc.addPage();
+      currentY = PAGE_MARGIN + 10;
+      maxColumnHeight = 0;
+      leftColumn = true;
+    }
+
+    // Calculate X position based on column
+    const x = leftColumn ? PAGE_MARGIN : PAGE_MARGIN * 2 + columnWidth;
+
+    // Add damage report box
+    doc.setDrawColor(200, 200, 200);
+    doc.setFillColor(250, 250, 250);
+    doc.roundedRect(x, currentY, columnWidth, textHeight, 2, 2, 'F');
+    
+    // Add text
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(0);
+    
+    const textLines = doc.splitTextToSize(damageText, columnWidth - 10);
+    doc.text(textLines, x + 5, currentY + 5);
+
+    // Update positions
+    if (leftColumn) {
+      maxColumnHeight = Math.max(maxColumnHeight, textHeight);
+    } else {
+      currentY += maxColumnHeight + 10;
+      maxColumnHeight = 0;
+    }
+
+    leftColumn = !leftColumn;
+  });
+
+  // Return final Y position
+  return currentY + maxColumnHeight + 10;
+};
+
+/**
+ * Adds header section to PDF
  */
 const addHeader = (doc, { categoryName, dateRange }) => {
   // Title
@@ -45,99 +158,16 @@ const addHeader = (doc, { categoryName, dateRange }) => {
 };
 
 /**
- * Adds damage notes section to PDF
+ * Calculate remaining space on current page
  */
-const addDamageNotes = (doc, services, startY) => {
-  // Only proceed if there are damages to report
-  const servicesWithDamages = services.filter(service => service.scooter?.damages?.length > 0);
-  if (servicesWithDamages.length === 0) return startY;
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Damage Reports', 15, startY + 15);
-
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-
-  let currentY = startY + 25;
-  
-  servicesWithDamages.forEach(service => {
-    const damages = service.scooter.damages.filter(d => !d.resolved);
-    if (damages.length === 0) return;
-
-    damages.forEach(damage => {
-      // Add scooter ID and date
-      doc.setFont('helvetica', 'bold');
-      doc.text(`Scooter ${service.scooter.id}`, 15, currentY);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Reported on: ${formatDate(damage.created_at)}`, 15, currentY + 5);
-      
-      // Add damage description with word wrap
-      const splitText = doc.splitTextToSize(damage.description, 180);
-      doc.text(splitText, 15, currentY + 12);
-      
-      currentY += 20 + (splitText.length * 5);
-
-      // Add extra spacing between damage reports
-      currentY += 5;
-
-      // Check if we need a new page
-      if (currentY > doc.internal.pageSize.height - 20) {
-        doc.addPage();
-        currentY = 20;
-      }
-    });
-  });
-
-  return currentY;
+const getRemainingSpace = (doc) => {
+  const pageHeight = doc.internal.pageSize.height;
+  const currentY = doc.previousAutoTable ? doc.previousAutoTable.finalY : doc.y;
+  return pageHeight - currentY - FOOTER_HEIGHT - FOOTER_PADDING;
 };
 
 /**
- * Adds summary section to PDF
- */
-const addSummary = (doc, { services }, finalY) => {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(14);
-  doc.text('Summary', 15, finalY + 20);
-  
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10);
-  doc.text(`Total Services: ${services.length}`, 15, finalY + 30);
-
-  // Count unresolved damages
-  const totalDamages = services.reduce((count, service) => {
-    return count + (service.scooter?.damages?.filter(d => !d.resolved)?.length || 0);
-  }, 0);
-  
-  if (totalDamages > 0) {
-    doc.text(`Active Damage Reports: ${totalDamages}`, 15, finalY + 37);
-  }
-
-  doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })}`, 15, finalY + (totalDamages > 0 ? 44 : 37));
-};
-
-/**
- * Adds footer to PDF
- */
-const addFooter = (doc) => {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(128);
-  addCenteredText(
-    doc, 
-    'Developed & Powered by Umanav Apti LTD.', 
-    doc.internal.pageSize.height - 18
-  );
-};
-
-/**
- * Main function to generate PDF report
+ * Generate PDF report for service history
  */
 export const generateServiceReport = async ({ categoryName, dateRange, services }) => {
   try {
@@ -160,7 +190,7 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
       service.service_details || ''
     ]);
 
-    // Add table
+    // Add service history table
     doc.autoTable({
       startY: 60,
       head: [['Date', 'Vehicle ID', 'Current KM', 'Next Service', 'Service Details']],
@@ -183,23 +213,52 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
         3: { cellWidth: 25, halign: 'right' },  // Next Service
         4: { cellWidth: 'auto' }  // Service Details
       },
+      margin: { top: PAGE_MARGIN, bottom: FOOTER_HEIGHT + FOOTER_PADDING },
       didDrawPage: function(data) {
-        // Add footer to each page
         addFooter(doc);
       }
     });
 
-    // Get the final Y position after the service table
-    const finalY = doc.lastAutoTable.finalY || 60;
+    // Get Y position after table
+    let currentY = doc.lastAutoTable.finalY + 15;
 
-    // Add damage notes section
-    const damageY = addDamageNotes(doc, services, finalY);
+    // Add damage reports if there's enough space, otherwise add new page
+    if (getRemainingSpace(doc) < 40) {
+      doc.addPage();
+      currentY = PAGE_MARGIN;
+    }
 
-    // Add summary after damage notes
-    addSummary(doc, { services }, damageY);
+    // Add damage reports section
+    currentY = addDamageReports(doc, services.map(s => s.scooter).filter(Boolean), currentY);
 
-    // Add page numbers
-    addPageNumbers(doc);
+    // Add summary section
+    if (getRemainingSpace(doc) < 40) {
+      doc.addPage();
+      currentY = PAGE_MARGIN;
+    }
+
+    // Add summary content
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text('Summary', PAGE_MARGIN, currentY);
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text(`Total Services: ${services.length}`, PAGE_MARGIN, currentY + 10);
+    
+    // Count active damage reports
+    const activeDamages = services.reduce((count, service) => {
+      return count + (service.scooter?.damages?.filter(d => !d.resolved)?.length || 0);
+    }, 0);
+    
+    doc.text(`Active Damage Reports: ${activeDamages}`, PAGE_MARGIN, currentY + 20);
+    doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })}`, PAGE_MARGIN, currentY + 30);
 
     // Save PDF
     const filename = `${categoryName}_Service_History_${formatDate(new Date())}.pdf`;
@@ -230,7 +289,7 @@ export const testPDFGeneration = async () => {
           damages: [
             {
               created_at: '2024-01-10',
-              description: 'Test damage report',
+              description: 'Left mirror damaged',
               resolved: false
             }
           ]
