@@ -26,17 +26,6 @@ function Categories() {
   const [exportingCategory, setExportingCategory] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
   const [expandedCategory, setExpandedCategory] = useState(null);
-  const [isScrolled, setIsScrolled] = useState(false);
-
-  useEffect(() => {
-    const handleScroll = () => {
-      const scrollPosition = window.scrollY;
-      setIsScrolled(scrollPosition > 100);
-    };
-
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -269,7 +258,6 @@ function Categories() {
     );
   }
 
-  // Helper function to determine available CC types based on category
   const getAvailableCcTypes = (categoryName) => {
     switch (categoryName) {
       case 'Bolt':
@@ -291,130 +279,144 @@ function Categories() {
   };
 
   return (
-    <div className="py-4 max-w-7xl mx-auto px-4">
-      {/* Search Bar */}
-      <div className="sticky top-16 bg-gray-50 py-4 z-20">
-        <div className="flex flex-col md:flex-row gap-4">
-          <input
-            type="search"
-            placeholder="Search any scooter..."
-            className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
-            onChange={(e) => debouncedSetSearchTerm(e.target.value)}
-            defaultValue={searchTerm}
-          />
-          <SingleDateFilter 
-            onDateSelect={handleDateSelect}
-            onClear={handleClearDate}
-          />
+    <div className="min-h-screen pb-4">
+      {/* Search and Filter - Sticky Header */}
+      <div className="sticky top-0 z-30 bg-gray-50 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4">
+          {/* Search and Date Filter */}
+          <div className="pt-4 pb-4">
+            <div className="flex flex-col md:flex-row gap-4">
+              <input
+                type="search"
+                placeholder="Search any scooter..."
+                className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
+                onChange={(e) => debouncedSetSearchTerm(e.target.value)}
+                defaultValue={searchTerm}
+              />
+              <SingleDateFilter 
+                onDateSelect={handleDateSelect}
+                onClear={handleClearDate}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Categories Grid */}
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {filteredCategories.map(category => (
-          <div key={category.id} className="bg-white rounded-lg shadow-sm">
-            {/* Category Header */}
-            <div 
-              className={`p-6 bg-white md:bg-transparent transition-all duration-300 
-                         md:relative ${isScrolled ? 'sticky top-32 z-10' : ''}`}
-            >
+      <div className="max-w-7xl mx-auto px-4">
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {filteredCategories.map(category => (
+            <div key={category.id} className="bg-white rounded-lg shadow-sm">
+              {/* Category Header - Sticky on mobile only when expanded */}
               <div 
-                className="flex justify-between items-center cursor-pointer md:cursor-default"
-                onClick={() => toggleCategory(category.id)}
+                className={`
+                  transition-all duration-300
+                  ${expandedCategory === category.id ? 
+                    'sticky top-[88px] bg-white z-20 shadow-sm' :
+                    'relative md:sticky md:top-[88px] md:bg-white md:z-20'
+                  }
+                `}
               >
-                <h2 className="text-xl font-bold flex items-center gap-3">
-                  {category.name}
-                  <ChevronDown 
-                    className={`h-5 w-5 transition-transform md:hidden 
-                             ${expandedCategory === category.id ? 'rotate-180' : ''}`} 
-                  />
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setExportingCategory(category);
-                      setShowDatePicker(true);
-                    }}
-                    className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50
-                             rounded-lg transition-colors"
-                    title="Export Service History"
+                <div className="p-6">
+                  <div 
+                    className="flex justify-between items-center cursor-pointer md:cursor-default"
+                    onClick={() => toggleCategory(category.id)}
                   >
-                    <FileDown className="h-5 w-5" />
-                  </button>
-                </h2>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedCategory(category.id);
-                    setSelectedCategoryName(category.name);
-                    setShowAddModal(true);
-                  }}
-                  className="bg-blue-500 text-white text-sm font-medium whitespace-nowrap
-                           md:px-3 md:py-1.5 px-10 py-2.5 rounded-lg hover:bg-blue-600"
-                >
-                  Add Scooter
-                </button>
-              </div>
-            </div>
-            
-{/* Scooters Stack */}
-<div className={`p-6 pt-0 space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
-              {category.scooters?.map(scooter => {
-                const damageStatus = getDamageAlertStatus(scooter.damages);
-                
-                return (
-                  <div
-                    key={scooter.id}
-                    onClick={() => navigate(`/scooters/${scooter.id}`)}
-                    className={`flex items-center justify-between p-4 
-                             bg-gray-50 rounded-lg hover:shadow-md 
-                             transition-all duration-300 cursor-pointer 
-                             border ${damageStatus.hasDamage ? damageStatus.style : 'border-gray-100'}`}
-                  >
-                    <div className="flex flex-col">
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-semibold">{scooter.id}</span>
-                        <span className="text-sm text-gray-500">
-                          ({formatCcType(scooter.cc_type, category.name)})
-                        </span>
-                      </div>
-                      <div className="flex flex-wrap gap-2 mt-1">
-                        {scooter.status === 'active' ? (
-                          <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-sm">
-                            Active
-                          </span>
-                        ) : (
-                          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-sm">
-                            Inactive
-                          </span>
-                        )}
-                        {damageStatus.hasDamage && (
-                          <span className="flex items-center gap-1 px-2 py-1 rounded-full text-sm 
-                                       bg-red-100 text-red-700">
-                            <AlertCircle className="h-4 w-4" />
-                            {damageStatus.text}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                    <h2 className="text-xl font-bold flex items-center gap-3">
+                      {category.name}
+                      <ChevronDown 
+                        className={`h-5 w-5 transition-transform md:hidden 
+                                  ${expandedCategory === category.id ? 'rotate-180' : ''}`} 
+                      />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setExportingCategory(category);
+                          setShowDatePicker(true);
+                        }}
+                        className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50
+                                rounded-lg transition-colors"
+                        title="Export Service History"
+                      >
+                        <FileDown className="h-5 w-5" />
+                      </button>
+                    </h2>
                     <button
-                      onClick={(e) => handleDeleteClick(e, scooter)}
-                      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 
-                               rounded-lg transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedCategory(category.id);
+                        setSelectedCategoryName(category.name);
+                        setShowAddModal(true);
+                      }}
+                      className="bg-blue-500 text-white text-sm font-medium whitespace-nowrap
+                              md:px-3 md:py-1.5 px-10 py-2.5 rounded-lg hover:bg-blue-600"
                     >
-                      <Trash2 className="h-5 w-5" />
+                      Add Scooter
                     </button>
                   </div>
-                );
-              })}
+                </div>
+              </div>
 
-              {(!category.scooters || category.scooters.length === 0) && (
-                <p className="text-gray-500 text-center py-4">
-                  No scooters found
-                </p>
-              )}
+{/* Scooters Stack */}
+<div className={`p-6 pt-0 space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
+                {category.scooters?.map(scooter => {
+                  const damageStatus = getDamageAlertStatus(scooter.damages);
+                  
+                  return (
+                    <div
+                      key={scooter.id}
+                      onClick={() => navigate(`/scooters/${scooter.id}`)}
+                      className={`flex items-center justify-between p-4 
+                               bg-gray-50 rounded-lg hover:shadow-md 
+                               transition-all duration-300 cursor-pointer 
+                               border ${damageStatus.hasDamage ? damageStatus.style : 'border-gray-100'}`}
+                    >
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-semibold">{scooter.id}</span>
+                          <span className="text-sm text-gray-500">
+                            ({formatCcType(scooter.cc_type, category.name)})
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {scooter.status === 'active' ? (
+                            <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-sm">
+                              Active
+                            </span>
+                          ) : (
+                            <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-sm">
+                              Inactive
+                            </span>
+                          )}
+                          {damageStatus.hasDamage && (
+                            <span className="flex items-center gap-1 px-2 py-1 rounded-full text-sm 
+                                         bg-red-100 text-red-700">
+                              <AlertCircle className="h-4 w-4" />
+                              {damageStatus.text}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => handleDeleteClick(e, scooter)}
+                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 
+                                 rounded-lg transition-colors"
+                      >
+                        <Trash2 className="h-5 w-5" />
+                      </button>
+                    </div>
+                  );
+                })}
+
+                {(!category.scooters || category.scooters.length === 0) && (
+                  <p className="text-gray-500 text-center py-4">
+                    No scooters found
+                  </p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
       {/* Add Scooter Modal */}
