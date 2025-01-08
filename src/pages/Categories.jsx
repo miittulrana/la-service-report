@@ -6,12 +6,14 @@ import { AlertCircle, Plus, X, Trash2, FileDown, ChevronDown } from 'lucide-reac
 import { useDebounce } from '../lib/performance';
 import DateRangePicker from '../components/ui/DateRangePicker';
 import { generateServiceReport } from '../lib/pdfUtils';
+import SingleDateFilter from '../components/ui/SingleDateFilter';
 
 function Categories() {
   const navigate = useNavigate();
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedDate, setSelectedDate] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [selectedCategoryName, setSelectedCategoryName] = useState('');
@@ -23,15 +25,13 @@ function Categories() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [exportingCategory, setExportingCategory] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
-  // New states for mobile
   const [expandedCategory, setExpandedCategory] = useState(null);
   const [isScrolled, setIsScrolled] = useState(false);
 
-  // Scroll handler
   useEffect(() => {
     const handleScroll = () => {
       const scrollPosition = window.scrollY;
-      setIsScrolled(scrollPosition > 100); // Change sticky behavior after 100px scroll
+      setIsScrolled(scrollPosition > 100);
     };
 
     window.addEventListener('scroll', handleScroll);
@@ -92,21 +92,36 @@ function Categories() {
     try {
       setIsExporting(true);
       
-      const { data: services, error } = await supabase
+      const { data: categoryScooters, error: scootersError } = await supabase
+        .from('scooters')
+        .select('id')
+        .eq('category_id', exportingCategory.id);
+
+      if (scootersError) throw scootersError;
+
+      const scooterIds = categoryScooters.map(s => s.id);
+      
+      const { data: services, error: servicesError } = await supabase
         .from('services')
         .select(`
           *,
           scooter:scooters(
             id,
-            category:categories(name)
+            category:categories(name),
+            damages(
+              id,
+              description,
+              created_at,
+              resolved
+            )
           )
         `)
+        .in('scooter_id', scooterIds)
         .gte('service_date', startDate)
         .lte('service_date', endDate)
-        .filter('scooter.category_id', 'eq', exportingCategory.id)
         .order('service_date', { ascending: false });
 
-      if (error) throw error;
+      if (servicesError) throw servicesError;
 
       await generateServiceReport({
         categoryName: exportingCategory.name,
@@ -122,6 +137,14 @@ function Categories() {
       setShowDatePicker(false);
       setExportingCategory(null);
     }
+  };
+
+  const handleDateSelect = (date) => {
+    setSelectedDate(date);
+  };
+
+  const handleClearDate = () => {
+    setSelectedDate(null);
   };
 
   const handleAddScooter = async (e) => {
@@ -212,13 +235,27 @@ function Categories() {
   };
 
   const filteredCategories = useMemo(() => {
-    return categories.map(category => ({
-      ...category,
-      scooters: category.scooters?.filter(scooter =>
-        scooter.id.toLowerCase().includes(searchTerm.toLowerCase())
-      )
-    }));
-  }, [categories, searchTerm]);
+    return categories.map(category => {
+      const filteredScooters = category.scooters?.filter(scooter => {
+        const matchesSearch = scooter.id.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        if (selectedDate) {
+          const selectedDateStr = selectedDate.toISOString().split('T')[0];
+          const hasServiceOnDate = scooter.services?.some(
+            service => service.service_date === selectedDateStr
+          );
+          return matchesSearch && hasServiceOnDate;
+        }
+        
+        return matchesSearch;
+      });
+
+      return {
+        ...category,
+        scooters: filteredScooters
+      };
+    });
+  }, [categories, searchTerm, selectedDate]);
 
   const debouncedSetSearchTerm = useDebounce((value) => {
     setSearchTerm(value);
@@ -232,24 +269,51 @@ function Categories() {
     );
   }
 
+  // Helper function to determine available CC types based on category
+  const getAvailableCcTypes = (categoryName) => {
+    switch (categoryName) {
+      case 'Bolt':
+        return [{ value: '125cc', label: '125cc (3000km interval)' }];
+      case 'Private Rental':
+        return [{ value: '125cc', label: '125cc (4500km interval)' }];
+      case 'Sliema':
+      case 'St.Lucija':
+        return [
+          { value: '125cc', label: '125cc (4000km interval)' },
+          { value: '50cc', label: '50cc (2500km interval)' }
+        ];
+      default:
+        return [
+          { value: '125cc', label: '125cc (4000km interval)' },
+          { value: '50cc', label: '50cc (2500km interval)' }
+        ];
+    }
+  };
+
   return (
     <div className="py-4 max-w-7xl mx-auto px-4">
       {/* Search Bar */}
       <div className="sticky top-16 bg-gray-50 py-4 z-20">
-        <input
-          type="search"
-          placeholder="Search any scooter..."
-          className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
-          onChange={(e) => debouncedSetSearchTerm(e.target.value)}
-          defaultValue={searchTerm}
-        />
+        <div className="flex flex-col md:flex-row gap-4">
+          <input
+            type="search"
+            placeholder="Search any scooter..."
+            className="w-full md:w-96 p-3 border rounded-lg shadow-sm"
+            onChange={(e) => debouncedSetSearchTerm(e.target.value)}
+            defaultValue={searchTerm}
+          />
+          <SingleDateFilter 
+            onDateSelect={handleDateSelect}
+            onClear={handleClearDate}
+          />
+        </div>
       </div>
 
       {/* Categories Grid */}
       <div className="mt-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {filteredCategories.map(category => (
           <div key={category.id} className="bg-white rounded-lg shadow-sm">
-            {/* Category Header - Sticky on mobile when scrolled */}
+            {/* Category Header */}
             <div 
               className={`p-6 bg-white md:bg-transparent transition-all duration-300 
                          md:relative ${isScrolled ? 'sticky top-32 z-10' : ''}`}
@@ -292,8 +356,8 @@ function Categories() {
               </div>
             </div>
             
-            {/* Scooters Stack - Hidden on mobile unless expanded */}
-            <div className={`p-6 pt-0 space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
+{/* Scooters Stack */}
+<div className={`p-6 pt-0 space-y-4 ${expandedCategory === category.id ? 'block' : 'hidden md:block'}`}>
               {category.scooters?.map(scooter => {
                 const damageStatus = getDamageAlertStatus(scooter.damages);
                 
@@ -310,7 +374,7 @@ function Categories() {
                       <div className="flex items-center gap-2">
                         <span className="text-lg font-semibold">{scooter.id}</span>
                         <span className="text-sm text-gray-500">
-                          ({formatCcType(scooter.cc_type)})
+                          ({formatCcType(scooter.cc_type, category.name)})
                         </span>
                       </div>
                       <div className="flex flex-wrap gap-2 mt-1">
@@ -353,172 +417,169 @@ function Categories() {
         ))}
       </div>
 
-{/* Add Scooter Modal */}
-{showAddModal && (
-       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-         <div className="bg-white rounded-lg p-6 max-w-md w-full">
-           <div className="flex items-center justify-between mb-4">
-             <h2 className="text-xl font-bold">
-               Add New Scooter 
-               {selectedCategoryName && ` - ${selectedCategoryName}`}
-             </h2>
-             <button
-               onClick={() => {
-                 setShowAddModal(false);
-                 setSelectedCategory(null);
-                 setSelectedCategoryName('');
-               }}
-               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-             >
-               <X className="h-5 w-5 text-gray-500" />
-             </button>
-           </div>
-           
-           <form onSubmit={handleAddScooter} className="space-y-4">
-             <div>
-               <label className="block text-sm font-medium mb-1">Scooter ID</label>
-               <input
-                 type="text"
-                 required
-                 className="w-full p-2 border rounded"
-                 value={newScooterId}
-                 onChange={(e) => setNewScooterId(e.target.value.toUpperCase())}
-                 placeholder="Enter scooter ID"
-               />
-             </div>
+      {/* Add Scooter Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">
+                Add New Scooter 
+                {selectedCategoryName && ` - ${selectedCategoryName}`}
+              </h2>
+              <button
+                onClick={() => {
+                  setShowAddModal(false);
+                  setSelectedCategory(null);
+                  setSelectedCategoryName('');
+                }}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddScooter} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Scooter ID</label>
+                <input
+                  type="text"
+                  required
+                  className="w-full p-2 border rounded"
+                  value={newScooterId}
+                  onChange={(e) => setNewScooterId(e.target.value.toUpperCase())}
+                  placeholder="Enter scooter ID"
+                />
+              </div>
 
-             {selectedCategoryName !== 'Bolt' && selectedCategoryName !== 'Private Rental' && (
-               <div>
-                 <label className="block text-sm font-medium mb-1">Engine Type</label>
-                 <select
-                   value={newScooterCcType}
-                   onChange={(e) => setNewScooterCcType(e.target.value)}
-                   className="w-full p-2 border rounded"
-                   required
-                 >
-                   <option value="125cc">125cc (4000km service interval)</option>
-                   <option value="50cc">50cc (2500km service interval)</option>
-                 </select>
-               </div>
-             )}
+              {selectedCategoryName !== 'Bolt' && selectedCategoryName !== 'Private Rental' && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Engine Type</label>
+                  <select
+                    value={newScooterCcType}
+                    onChange={(e) => setNewScooterCcType(e.target.value)}
+                    className="w-full p-2 border rounded"
+                    required
+                  >
+                    {getAvailableCcTypes(selectedCategoryName).map(type => (
+                      <option key={type.value} value={type.value}>
+                        {type.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
-             {selectedCategoryName === 'Bolt' && (
-               <div className="p-3 bg-blue-50 rounded-lg">
-                 <p className="text-sm text-blue-600">
-                   Bolt scooters are automatically set to 125cc BOLT type with 3000km service interval
-                 </p>
-               </div>
-             )}
+              {selectedCategoryName === 'Bolt' && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-600">
+                    Bolt scooters are automatically set to 125cc BOLT type with 3000km service interval
+                  </p>
+                </div>
+              )}
 
-             {selectedCategoryName === 'Private Rental' && (
-               <div>
-                 <label className="block text-sm font-medium mb-1">Engine Type</label>
-                 <select
-                   value={newScooterCcType}
-                   onChange={(e) => setNewScooterCcType(e.target.value)}
-                   className="w-full p-2 border rounded"
-                   required
-                 >
-                   <option value="125cc">125cc (4000km service interval)</option>
-                 </select>
-               </div>
-             )}
+              {selectedCategoryName === 'Private Rental' && (
+                <div className="p-3 bg-blue-50 rounded-lg">
+                  <p className="text-sm text-blue-600">
+                    Private Rental scooters are set to 4500km service interval
+                  </p>
+                </div>
+              )}
 
-             <div className="flex justify-end gap-2 pt-4">
-               <button
-                 type="button"
-                 onClick={() => {
-                   setShowAddModal(false);
-                   setSelectedCategory(null);
-                   setSelectedCategoryName('');
-                 }}
-                 className="px-4 py-2 text-gray-600 hover:text-gray-800"
-               >
-                 Cancel
-               </button>
-               <button
-                 type="submit"
-                 className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-               >
-                 Add Scooter
-               </button>
-             </div>
-           </form>
-         </div>
-       </div>
-     )}
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowAddModal(false);
+                    setSelectedCategory(null);
+                    setSelectedCategoryName('');
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                >
+                  Add Scooter
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-     {/* Delete Modal */}
-     {showDeleteModal && (
-       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-         <div className="bg-white rounded-lg p-6 max-w-md w-full">
-           <div className="flex items-center justify-between mb-4">
-             <h2 className="text-xl font-bold">Delete Scooter</h2>
-             <button
-               onClick={() => {
-                 setShowDeleteModal(false);
-                 setScooterToDelete(null);
-               }}
-               disabled={isDeleting}
-               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-             >
-               <X className="h-5 w-5 text-gray-500" />
-             </button>
-           </div>
-           
-           <div className="mb-6">
-             <p className="text-gray-600">
-               Are you sure you want to delete scooter {scooterToDelete?.id}? This will also delete all service records and damage reports. This action cannot be undone.
-             </p>
-           </div>
+      {/* Delete Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">Delete Scooter</h2>
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setScooterToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <X className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-600">
+                Are you sure you want to delete scooter {scooterToDelete?.id}? This will also delete all service records and damage reports. This action cannot be undone.
+              </p>
+            </div>
 
-           <div className="flex justify-end gap-2">
-             <button
-               onClick={() => {
-                 setShowDeleteModal(false);
-                 setScooterToDelete(null);
-               }}
-               disabled={isDeleting}
-               className="px-4 py-2 text-gray-600 hover:text-gray-800"
-             >
-               Cancel
-             </button>
-             <button
-               onClick={handleDeleteConfirm}
-               disabled={isDeleting}
-               className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 
-                        disabled:opacity-50 flex items-center gap-2"
-             >
-               {isDeleting ? (
-                 <>
-                   <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                   <span>Deleting...</span>
-                 </>
-               ) : (
-                 <>
-                   <Trash2 className="h-4 w-4" />
-                   <span>Delete Scooter</span>
-                 </>
-               )}
-             </button>
-           </div>
-         </div>
-       </div>
-     )}
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowDeleteModal(false);
+                  setScooterToDelete(null);
+                }}
+                disabled={isDeleting}
+                className="px-4 py-2 text-gray-600 hover:text-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 
+                         disabled:opacity-50 flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    <span>Delete Scooter</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-     {/* Date Range Picker for Export */}
-     <DateRangePicker
-       isOpen={showDatePicker}
-       onClose={() => {
-         setShowDatePicker(false);
-         setExportingCategory(null);
-       }}
-       onExport={handleExport}
-       isLoading={isExporting}
-       categoryName={exportingCategory?.name}
-     />
-   </div>
- );
+      {/* Date Range Picker for Export */}
+      <DateRangePicker
+        isOpen={showDatePicker}
+        onClose={() => {
+          setShowDatePicker(false);
+          setExportingCategory(null);
+        }}
+        onExport={handleExport}
+        isLoading={isExporting}
+        categoryName={exportingCategory?.name}
+      />
+    </div>
+  );
 }
 
 export default Categories;

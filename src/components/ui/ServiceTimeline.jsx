@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import PropTypes from 'prop-types';
 import { ChevronDown, Wrench } from 'lucide-react';
-import { formatDate, formatKm, getServiceIntervalText } from '../../lib/utils';
+import { formatDate, formatKm } from '../../lib/utils';
 
-export const ServiceTimeline = ({ services, scooterCcType }) => {
+export const ServiceTimeline = ({ services, scooterCcType, category }) => {
   const [expandedService, setExpandedService] = useState(null);
 
   if (!services?.length) {
@@ -13,6 +13,26 @@ export const ServiceTimeline = ({ services, scooterCcType }) => {
       </div>
     );
   }
+
+  // Get correct interval text based on both cc type and category
+  const getIntervalDisplay = () => {
+    if (category?.toLowerCase() === 'private rental') {
+      return '4500km';
+    }
+    if (category?.toLowerCase() === 'bolt') {
+      return '3000km';
+    }
+    switch (scooterCcType) {
+      case '125cc BOLT':
+        return '3000km';
+      case '125cc':
+        return '4000km';
+      case '50cc':
+        return '2500km';
+      default:
+        return '4000km';
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -29,7 +49,7 @@ export const ServiceTimeline = ({ services, scooterCcType }) => {
             )}
 
             {/* Service entry */}
-            <div className="card hover:bg-gray-50/50">
+            <div className="bg-white rounded-lg shadow-sm border border-gray-200">
               {/* Header */}
               <button
                 className="w-full text-left p-4 focus:outline-none"
@@ -50,7 +70,7 @@ export const ServiceTimeline = ({ services, scooterCcType }) => {
                         <p className="font-semibold">
                           Service at {formatKm(service.current_km)} km
                           <span className="ml-2 text-sm text-gray-500">
-                            ({scooterCcType} - {getServiceIntervalText(scooterCcType)} interval)
+                            ({scooterCcType} - {getIntervalDisplay()} interval)
                           </span>
                         </p>
                         <p className="text-sm text-gray-500">
@@ -72,7 +92,7 @@ export const ServiceTimeline = ({ services, scooterCcType }) => {
               {isExpanded && (
                 <div className="px-16 pb-4 animate-fade-in">
                   <div className="p-4 bg-gray-50 rounded-lg">
-                    <h4 className="font-medium mb-2">Service Details:</h4>
+                    <h4 className="font-medium text-gray-900 mb-2">Service Details:</h4>
                     <p className="text-gray-600 whitespace-pre-wrap">
                       {service.service_details}
                     </p>
@@ -97,7 +117,8 @@ ServiceTimeline.propTypes = {
       service_details: PropTypes.string.isRequired,
     })
   ).isRequired,
-  scooterCcType: PropTypes.string.isRequired
+  scooterCcType: PropTypes.string.isRequired,
+  category: PropTypes.string
 };
 
 export default ServiceTimeline;

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown } from 'lucide-react';
+import { ArrowLeft, AlertCircle, Trash2, Plus, X, FileDown, Pencil } from 'lucide-react';
 import CustomDatePicker from '../components/ui/CustomDatePicker';
 import DamageNote from '../components/ui/DamageNote';
 import { calculateNextServiceKm, formatCcType } from '../lib/utils';
@@ -28,6 +28,11 @@ function ScooterDetails() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // Edit service states
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingService, setEditingService] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
 
   // New service form state
   const [newService, setNewService] = useState({
@@ -76,8 +81,7 @@ function ScooterDetails() {
     e.preventDefault();
     try {
       const currentKm = parseInt(newService.current_km);
-      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
-
+      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type, scooter.category?.name);
       const { error } = await supabase
         .from('services')
         .insert([{
@@ -106,6 +110,39 @@ function ScooterDetails() {
     } catch (error) {
       console.error('Error:', error);
       alert('Error adding service');
+    }
+  };
+
+  // Handle editing service
+  const handleEditService = async (e) => {
+    e.preventDefault();
+    if (!editingService) return;
+
+    try {
+      setIsEditing(true);
+      const currentKm = parseInt(editingService.current_km);
+      const nextKm = calculateNextServiceKm(currentKm, scooter.cc_type);
+
+      const { error } = await supabase
+        .from('services')
+        .update({
+          service_date: editingService.service_date,
+          current_km: currentKm,
+          next_km: nextKm,
+          service_details: editingService.service_details
+        })
+        .eq('id', editingService.id);
+
+      if (error) throw error;
+
+      setShowEditModal(false);
+      setEditingService(null);
+      fetchScooterDetails();
+    } catch (error) {
+      console.error('Error:', error);
+      alert('Error updating service');
+    } finally {
+      setIsEditing(false);
     }
   };
 
@@ -252,81 +289,88 @@ function ScooterDetails() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 md:px-6 pt-16 md:pt-4">
-      {/* Header */}
-      <div className="mb-6">
-        <div className="flex items-center gap-4 mb-4">
-          <button
-            onClick={() => navigate('/')}
-            className="p-2 hover:bg-gray-100 rounded-lg"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-bold">{scooter.id}</h1>
-              <span className="text-lg text-gray-500">
-                ({formatCcType(scooter.cc_type)})
-              </span>
-            </div>
-            <p className="text-gray-600 text-lg">{scooter.category?.name}</p>
-          </div>
-          <button
-            onClick={() => setShowDeleteScooterModal(true)}
-            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 
-                     rounded-lg transition-colors"
-            title="Delete Scooter"
-          >
-            <Trash2 className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-3 items-center justify-between">
-          <div className="flex gap-2 items-center">
-            <span className={`px-4 py-2 rounded-lg text-sm font-medium ${
-              scooter.status === 'active' 
-                ? 'bg-green-100 text-green-700' 
-                : 'bg-red-100 text-red-700'
-            }`}>
-              {scooter.status === 'active' ? 'Active' : 'Inactive'}
-            </span>
-            
-            <button
-              onClick={toggleStatus}
-              disabled={updating}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                scooter.status === 'active'
-                  ? 'bg-red-100 text-red-700 hover:bg-red-200'
-                  : 'bg-green-100 text-green-700 hover:bg-green-200'
-              }`}
-            >
-              {updating ? 'Updating...' : scooter.status === 'active' ? 'Set Inactive' : 'Set Active'}
-            </button>
-          </div>
-
-          <div className="flex gap-2 items-center">
-            <ExcelImport 
-              scooterId={scooter.id} 
-              onImportComplete={fetchScooterDetails}
-            />
-            <button
-              onClick={() => setShowExportModal(true)}
-              className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg 
-                       hover:bg-blue-200 transition-colors flex items-center gap-2"
-            >
-              <FileDown className="h-4 w-4" />
-              Export History
-            </button>
-            <button
-              onClick={() => setShowAddService(true)}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 
-                       text-sm font-medium flex items-center gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              Add Service
-            </button>
-          </div>
-        </div>
+{/* Header */}
+<div className="mb-6">
+  <div className="flex items-center gap-4 mb-4">
+    <button
+      onClick={() => navigate('/')}
+      className="p-2 hover:bg-gray-100 rounded-lg"
+    >
+      <ArrowLeft className="h-5 w-5" />
+    </button>
+    <div className="flex-1">
+      <div className="flex items-center gap-2">
+        <h1 className="text-3xl font-bold">{scooter.id}</h1>
+        <span className="text-lg text-gray-500">
+          ({formatCcType(scooter.cc_type, scooter.category?.name)})
+        </span>
       </div>
+      <div className="flex items-center gap-2">
+        <p className="text-gray-600 text-lg">{scooter.category?.name}</p>
+        {scooter.category?.name?.toLowerCase() === 'private rental' && (
+          <span className="text-sm text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+            4500km interval
+          </span>
+        )}
+      </div>
+    </div>
+    <button
+      onClick={() => setShowDeleteScooterModal(true)}
+      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 
+                rounded-lg transition-colors"
+      title="Delete Scooter"
+    >
+      <Trash2 className="h-5 w-5" />
+    </button>
+  </div>
+
+  <div className="flex flex-wrap gap-3 items-center justify-between">
+    <div className="flex gap-2 items-center">
+      <span className={`px-4 py-2 rounded-lg text-sm font-medium ${
+        scooter.status === 'active' 
+          ? 'bg-green-100 text-green-700' 
+          : 'bg-red-100 text-red-700'
+      }`}>
+        {scooter.status === 'active' ? 'Active' : 'Inactive'}
+      </span>
+      
+      <button
+        onClick={toggleStatus}
+        disabled={updating}
+        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+          scooter.status === 'active'
+            ? 'bg-red-100 text-red-700 hover:bg-red-200'
+            : 'bg-green-100 text-green-700 hover:bg-green-200'
+        }`}
+      >
+        {updating ? 'Updating...' : scooter.status === 'active' ? 'Set Inactive' : 'Set Active'}
+      </button>
+    </div>
+
+    <div className="flex flex-wrap gap-2 items-center">
+      <ExcelImport 
+        scooterId={scooter.id} 
+        onImportComplete={fetchScooterDetails}
+      />
+      <button
+        onClick={() => setShowExportModal(true)}
+        className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg 
+                 hover:bg-blue-200 transition-colors flex items-center gap-2"
+      >
+        <FileDown className="h-4 w-4" />
+        <span className="hidden sm:inline">Export History</span>
+      </button>
+      <button
+        onClick={() => setShowAddService(true)}
+        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 
+                 text-sm font-medium flex items-center gap-2"
+      >
+        <Plus className="h-4 w-4" />
+        <span>Add Service</span>
+      </button>
+    </div>
+  </div>
+</div>
 
       {/* Damage Note Section */}
       <div className="mb-8 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
@@ -336,130 +380,282 @@ function ScooterDetails() {
         />
       </div>
 
-      {/* Service History */}
-      <div className="space-y-4">
-        {services.map((service) => (
-          <div key={service.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
-            <div className="p-4">
-              <div className="flex justify-between items-start">
-                <div className="flex-1">
-                  <p className="font-bold text-lg">
-                    {new Date(service.service_date).toLocaleDateString()}
-                  </p>
-                  <p className="text-gray-600 mt-1">
-                    {service.current_km.toLocaleString()} km → {service.next_km.toLocaleString()} km
-                  </p>
-                </div>
-                <button
-                  onClick={() => {
-                    setServiceToDelete(service);
-                    setShowDeleteServiceModal(true);
-                  }}
-                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                >
-                  <Trash2 className="h-5 w-5" />
-                </button>
-              </div>
+{/* Service History */}
+<div className="space-y-4">
+  {services.map((service) => {
+    // Helper function to get interval text and KM
+    const getServiceDetails = () => {
+      const categoryLower = scooter.category?.name?.toLowerCase();
+      if (categoryLower === 'private rental') {
+        return { text: 'Private Rental', km: '4500km' };
+      }
+      if (categoryLower === 'bolt') {
+        return { text: 'Bolt', km: '3000km' };
+      }
+      switch (scooter.cc_type) {
+        case '125cc BOLT':
+          return { text: '125cc BOLT', km: '3000km' };
+        case '125cc':
+          return { text: '125cc', km: '4000km' };
+        case '50cc':
+          return { text: '50cc', km: '2500km' };
+        default:
+          return { text: '125cc', km: '4000km' };
+      }
+    };
 
-              <div className="mt-4 pt-4 border-t">
-                <h3 className="font-medium text-gray-900 mb-2">Service Details:</h3>
-                <p className="text-gray-600 whitespace-pre-wrap">
-                  {service.service_details}
+    const serviceDetails = getServiceDetails();
+
+    return (
+      <div key={service.id} className="bg-white rounded-lg shadow-sm border border-gray-200">
+        <div className="p-4">
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <p className="font-bold text-lg">
+                  {new Date(service.service_date).toLocaleDateString()}
                 </p>
+                <span className="text-sm text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                  {serviceDetails.text} • {serviceDetails.km}
+                </span>
               </div>
+              <p className="text-gray-600 mt-1">
+                {service.current_km.toLocaleString()} km → {service.next_km.toLocaleString()} km
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setEditingService({
+                    ...service,
+                    service_date: service.service_date
+                  });
+                  setShowEditModal(true);
+                }}
+                className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Edit service"
+              >
+                <Pencil className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => {
+                  setServiceToDelete(service);
+                  setShowDeleteServiceModal(true);
+                }}
+                className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                <Trash2 className="h-5 w-5" />
+              </button>
             </div>
           </div>
-        ))}
 
-        {services.length === 0 && (
-          <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
-            <p className="text-gray-500">No service history found</p>
-          </div>
-        )}
-      </div>
-
-      {/* Add Service Modal */}
-      {showAddService && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <div className="flex justify-between items-center">
-                <h2 className="text-xl font-bold">Add Service for {scooter.id}</h2>
-                <button
-                  onClick={() => setShowAddService(false)}
-                  className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <X className="h-5 w-5 text-gray-500" />
-                </button>
-              </div>
-            </div>
-            
-            <form onSubmit={handleAddService} className="p-6 space-y-4">
-              <CustomDatePicker
-                label="Service Date"
-                date={new Date(newService.service_date)}
-                onChange={(date) => setNewService(prev => ({
-                  ...prev,
-                  service_date: date.toISOString().split('T')[0]
-                }))}
-              />
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Current KM</label>
-                <input
-                  type="number"
-                  required
-                  className="w-full p-2 border rounded-lg"
-                  value={newService.current_km}
-                  onChange={(e) => setNewService(prev => ({
-                    ...prev,
-                    current_km: e.target.value
-                  }))}
-                />
-                <p className="text-sm text-gray-500 mt-1">
-                  Next service will be at: {newService.current_km && (
-                    parseInt(newService.current_km) + (
-                      scooter.cc_type === '125cc BOLT' ? 3000 :
-                      scooter.cc_type === '50cc' ? 2500 : 4000
-                    )
-                  ).toLocaleString()} km
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-1">Service Details</label>
-                <textarea
-                  required
-                  className="w-full p-2 border rounded-lg"
-                  rows={4}
-                  value={newService.service_details}
-                  placeholder="Enter service details..."
-                  onChange={(e) => setNewService(prev => ({
-                    ...prev,
-                    service_details: e.target.value
-                  }))}
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-4 border-t">
-                <button
-                  type="button"
-                  onClick={() => setShowAddService(false)}
-                  className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
-                >
-                  Save Service
-                </button>
-              </div>
-            </form>
+          <div className="mt-4 pt-4 border-t">
+            <h3 className="font-medium text-gray-900 mb-2">Service Details:</h3>
+            <p className="text-gray-600 whitespace-pre-wrap">
+              {service.service_details}
+            </p>
           </div>
         </div>
-      )}
+      </div>
+    );
+  })}
+
+  {services.length === 0 && (
+    <div className="text-center py-8 bg-white rounded-lg border border-gray-200">
+      <p className="text-gray-500">No service history found</p>
+    </div>
+  )}
+</div>
+
+{/* Add Service Modal */}
+{showAddService && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold">Add Service for {scooter.id}</h2>
+          <button
+            onClick={() => setShowAddService(false)}
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+      </div>
+      
+      <form onSubmit={handleAddService} className="p-6 space-y-4">
+        <CustomDatePicker
+          label="Service Date"
+          date={new Date(newService.service_date)}
+          onChange={(date) => setNewService(prev => ({
+            ...prev,
+            service_date: date.toISOString().split('T')[0]
+          }))}
+        />
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Current KM</label>
+          <input
+            type="number"
+            required
+            className="w-full p-2 border rounded-lg"
+            value={newService.current_km}
+            onChange={(e) => setNewService(prev => ({
+              ...prev,
+              current_km: e.target.value
+            }))}
+          />
+          <p className="text-sm text-gray-500 mt-1">
+            Next service will be at: {newService.current_km && (
+              parseInt(newService.current_km) + (
+                scooter.category?.name?.toLowerCase() === 'private rental' ? 4500 :
+                scooter.category?.name?.toLowerCase() === 'bolt' ? 3000 :
+                scooter.cc_type === '125cc BOLT' ? 3000 :
+                scooter.cc_type === '50cc' ? 2500 : 4000
+              )
+            ).toLocaleString()} km
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Service Details</label>
+          <textarea
+            required
+            className="w-full p-2 border rounded-lg"
+            rows={4}
+            value={newService.service_details}
+            placeholder="Enter service details..."
+            onChange={(e) => setNewService(prev => ({
+              ...prev,
+              service_details: e.target.value
+            }))}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button
+            type="button"
+            onClick={() => setShowAddService(false)}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+          >
+            Save Service
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
+
+{/* Edit Service Modal */}
+{showEditModal && (
+  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+    <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+      <div className="px-6 py-4 border-b border-gray-200">
+        <div className="flex justify-between items-center">
+          <h2 className="text-xl font-bold">Edit Service Record</h2>
+          <button
+            onClick={() => {
+              setShowEditModal(false);
+              setEditingService(null);
+            }}
+            className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X className="h-5 w-5 text-gray-500" />
+          </button>
+        </div>
+      </div>
+      
+      <form onSubmit={handleEditService} className="p-6 space-y-4">
+        <CustomDatePicker
+          label="Service Date"
+          date={new Date(editingService.service_date)}
+          onChange={(date) => setEditingService(prev => ({
+            ...prev,
+            service_date: date.toISOString().split('T')[0]
+          }))}
+        />
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Current KM</label>
+          <input
+            type="number"
+            required
+            className="w-full p-2 border rounded-lg"
+            value={editingService.current_km}
+            onChange={(e) => setEditingService(prev => ({
+              ...prev,
+              current_km: e.target.value
+            }))}
+          />
+          <p className="text-sm text-gray-500 mt-1">
+            Next service will be at: {editingService.current_km && (
+              parseInt(editingService.current_km) + (
+                scooter.category?.name?.toLowerCase() === 'private rental' ? 4500 :
+                scooter.category?.name?.toLowerCase() === 'bolt' ? 3000 :
+                scooter.cc_type === '125cc BOLT' ? 3000 :
+                scooter.cc_type === '50cc' ? 2500 : 4000
+              )
+            ).toLocaleString()} km
+          </p>
+          {scooter.category?.name?.toLowerCase() === 'private rental' && (
+            <p className="text-sm text-blue-600 mt-1">
+              Private Rental - 4500km service interval
+            </p>
+          )}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Service Details</label>
+          <textarea
+            required
+            className="w-full p-2 border rounded-lg"
+            rows={4}
+            value={editingService.service_details}
+            placeholder="Enter service details..."
+            onChange={(e) => setEditingService(prev => ({
+              ...prev,
+              service_details: e.target.value
+            }))}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 pt-4 border-t">
+          <button
+            type="button"
+            onClick={() => {
+              setShowEditModal(false);
+              setEditingService(null);
+            }}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={isEditing}
+            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 
+                     disabled:opacity-50 flex items-center gap-2"
+          >
+            {isEditing ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                <span>Updating...</span>
+              </>
+            ) : (
+              'Update Service'
+            )}
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+)}
 
       {/* Delete Service Modal */}
       <Modal

@@ -45,6 +45,54 @@ const addHeader = (doc, { categoryName, dateRange }) => {
 };
 
 /**
+ * Adds damage notes section to PDF
+ */
+const addDamageNotes = (doc, services, startY) => {
+  // Only proceed if there are damages to report
+  const servicesWithDamages = services.filter(service => service.scooter?.damages?.length > 0);
+  if (servicesWithDamages.length === 0) return startY;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(14);
+  doc.text('Damage Reports', 15, startY + 15);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+
+  let currentY = startY + 25;
+  
+  servicesWithDamages.forEach(service => {
+    const damages = service.scooter.damages.filter(d => !d.resolved);
+    if (damages.length === 0) return;
+
+    damages.forEach(damage => {
+      // Add scooter ID and date
+      doc.setFont('helvetica', 'bold');
+      doc.text(`Scooter ${service.scooter.id}`, 15, currentY);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Reported on: ${formatDate(damage.created_at)}`, 15, currentY + 5);
+      
+      // Add damage description with word wrap
+      const splitText = doc.splitTextToSize(damage.description, 180);
+      doc.text(splitText, 15, currentY + 12);
+      
+      currentY += 20 + (splitText.length * 5);
+
+      // Add extra spacing between damage reports
+      currentY += 5;
+
+      // Check if we need a new page
+      if (currentY > doc.internal.pageSize.height - 20) {
+        doc.addPage();
+        currentY = 20;
+      }
+    });
+  });
+
+  return currentY;
+};
+
+/**
  * Adds summary section to PDF
  */
 const addSummary = (doc, { services }, finalY) => {
@@ -55,13 +103,23 @@ const addSummary = (doc, { services }, finalY) => {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
   doc.text(`Total Services: ${services.length}`, 15, finalY + 30);
+
+  // Count unresolved damages
+  const totalDamages = services.reduce((count, service) => {
+    return count + (service.scooter?.damages?.filter(d => !d.resolved)?.length || 0);
+  }, 0);
+  
+  if (totalDamages > 0) {
+    doc.text(`Active Damage Reports: ${totalDamages}`, 15, finalY + 37);
+  }
+
   doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  })}`, 15, finalY + 37);
+  })}`, 15, finalY + (totalDamages > 0 ? 44 : 37));
 };
 
 /**
@@ -131,9 +189,14 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
       }
     });
 
-    // Add summary after table
+    // Get the final Y position after the service table
     const finalY = doc.lastAutoTable.finalY || 60;
-    addSummary(doc, { services }, finalY);
+
+    // Add damage notes section
+    const damageY = addDamageNotes(doc, services, finalY);
+
+    // Add summary after damage notes
+    addSummary(doc, { services }, damageY);
 
     // Add page numbers
     addPageNumbers(doc);
@@ -162,7 +225,16 @@ export const testPDFGeneration = async () => {
     services: [
       {
         service_date: '2024-01-15',
-        scooter: { id: 'TEST001' },
+        scooter: { 
+          id: 'TEST001',
+          damages: [
+            {
+              created_at: '2024-01-10',
+              description: 'Test damage report',
+              resolved: false
+            }
+          ]
+        },
         current_km: 5000,
         next_km: 8000,
         service_details: 'Regular maintenance'

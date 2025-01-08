@@ -36,23 +36,48 @@ export const getStatusColor = (status) => {
 };
 
 /**
- * Calculate next service KM based on CC type
+ * Calculate next service KM based on category and CC type
  */
-export const calculateNextServiceKm = (currentKm, ccType) => {
+export const calculateNextServiceKm = (currentKm, ccType, category) => {
   let interval;
   
-  switch (ccType) {
-    case '125cc BOLT':
+  // Handle category-specific intervals
+  switch (category?.toLowerCase()) {
+    case 'bolt':
       interval = 3000;
       break;
-    case '125cc':
-      interval = 4000;
+    case 'private rental':
+      interval = 4500;
       break;
-    case '50cc':
-      interval = 2500;
+    case 'sliema':
+    case 'st.lucija':
+      // For these categories, check cc type
+      switch (ccType) {
+        case '125cc':
+          interval = 4000;
+          break;
+        case '50cc':
+          interval = 2500;
+          break;
+        default:
+          interval = 4000; // Default to 125cc interval
+      }
       break;
     default:
-      interval = 4000;
+      // Default intervals based on cc type only
+      switch (ccType) {
+        case '125cc BOLT':
+          interval = 3000;
+          break;
+        case '125cc':
+          interval = 4000;
+          break;
+        case '50cc':
+          interval = 2500;
+          break;
+        default:
+          interval = 4000;
+      }
   }
 
   return currentKm + interval;
@@ -112,32 +137,56 @@ export const calculateServiceStatus = (currentKm, nextServiceKm) => {
 };
 
 /**
- * Get service interval based on CC type
+ * Get service interval based on category and CC type
  */
-export const getServiceInterval = (ccType) => {
-  switch (ccType) {
-    case '125cc BOLT':
+export const getServiceInterval = (ccType, category) => {
+  // Handle category-specific intervals
+  switch (category?.toLowerCase()) {
+    case 'bolt':
       return 3000;
-    case '125cc':
-      return 4000;
-    case '50cc':
-      return 2500;
+    case 'private rental':
+      return 4500;
+    case 'sliema':
+    case 'st.lucija':
+      // For these categories, check cc type
+      switch (ccType) {
+        case '125cc':
+          return 4000;
+        case '50cc':
+          return 2500;
+        default:
+          return 4000; // Default to 125cc interval
+      }
     default:
-      return 4000;
+      // Default intervals based on cc type only
+      switch (ccType) {
+        case '125cc BOLT':
+          return 3000;
+        case '125cc':
+          return 4000;
+        case '50cc':
+          return 2500;
+        default:
+          return 4000;
+      }
   }
 };
 
 /**
  * Get service interval text display
  */
-export const getServiceIntervalText = (ccType) => {
-  return `${getServiceInterval(ccType)}km`;
+export const getServiceIntervalText = (ccType, category) => {
+  return `${getServiceInterval(ccType, category)}km`;
 };
 
 /**
  * Format CC type for display
  */
-export const formatCcType = (ccType) => {
+export const formatCcType = (ccType, category) => {
+  if (category?.toLowerCase() === 'private rental') {
+    return 'Private Rental (4500km)';
+  }
+
   switch (ccType) {
     case '125cc BOLT':
       return 'Bolt (3000km)';
@@ -147,7 +196,7 @@ export const formatCcType = (ccType) => {
       return '50cc (2500km)';
     default:
       return ccType || 'Unknown';
-  };
+  }
 };
 
 /**
