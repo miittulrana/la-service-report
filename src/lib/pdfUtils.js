@@ -1,12 +1,20 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
-import { formatDate, formatKm } from './utils';
+import { formatKm } from './utils';
 
 // Constants for PDF layout
 const PAGE_MARGIN = 15;
 const FOOTER_HEIGHT = 35;
 const FOOTER_PADDING = 10;
 const COLUMN_GAP = 15;
+
+/**
+ * Format date consistently
+ */
+const formatPDFDate = (date) => {
+  const d = new Date(date);
+  return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`;
+};
 
 /**
  * Adds centered text to PDF
@@ -44,10 +52,11 @@ const addFooter = (doc) => {
 /**
  * Formats damage report text
  */
-const formatDamageReport = (scooterId, date, description) => {
+const formatDamageReport = (scooterId, date, description, resolved) => {
   return [
     `Scooter ${scooterId}`,
-    `Reported on: ${formatDate(date)}`,
+    `Reported on: ${formatPDFDate(date)}`,
+    `Status: ${resolved ? 'Resolved' : 'Active'}`,
     description
   ].join('\n');
 };
@@ -57,30 +66,39 @@ const formatDamageReport = (scooterId, date, description) => {
  */
 const getDamageReportHeight = (doc, text) => {
   const lines = doc.splitTextToSize(text, (doc.internal.pageSize.width - (3 * PAGE_MARGIN)) / 2);
-  return lines.length * (doc.internal.getFontSize() / (72 / 25.6)) + 10; // Add some padding
+  return lines.length * (doc.internal.getFontSize() / (72 / 25.6)) + 10;
+};
+
+/**
+ * Collects damages within date range
+ */
+const getFilteredDamages = (services, startDate, endDate) => {
+  let damages = [];
+  services.forEach(service => {
+    if (service.scooter?.damages) {
+      service.scooter.damages.forEach(damage => {
+        const damageDate = damage.created_at.split('T')[0];
+        if (damageDate >= startDate && damageDate <= endDate) {
+          damages.push({
+            ...damage,
+            scooterId: service.scooter.id
+          });
+        }
+      });
+    }
+  });
+  return damages.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 };
 
 /**
  * Adds damage reports section in 2-column layout
  */
-const addDamageReports = (doc, scooters, startY) => {
+const addDamageReports = (doc, damages, startY) => {
   const pageWidth = doc.internal.pageSize.width;
   const columnWidth = (pageWidth - (3 * PAGE_MARGIN)) / 2;
   let currentY = startY + 10;
   let leftColumn = true;
   let maxColumnHeight = 0;
-
-  // Collect all damages
-  const allDamages = scooters.reduce((damages, scooter) => {
-    if (scooter.damages && scooter.damages.length > 0) {
-      const scooterDamages = scooter.damages.map(damage => ({
-        ...damage,
-        scooterId: scooter.id
-      }));
-      return [...damages, ...scooterDamages];
-    }
-    return damages;
-  }, []);
 
   // Add section title
   doc.setFont('helvetica', 'bold');
@@ -89,12 +107,20 @@ const addDamageReports = (doc, scooters, startY) => {
   doc.text('Damage Reports', PAGE_MARGIN, currentY);
   currentY += 10;
 
+  if (damages.length === 0) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('No damage reports found for this period.', PAGE_MARGIN, currentY + 5);
+    return currentY + 20;
+  }
+
   // Process each damage report
-  allDamages.forEach((damage, index) => {
+  damages.forEach((damage, index) => {
     const damageText = formatDamageReport(
       damage.scooterId,
       damage.created_at,
-      damage.description
+      damage.description,
+      damage.resolved
     );
     
     const textHeight = getDamageReportHeight(doc, damageText);
@@ -110,9 +136,13 @@ const addDamageReports = (doc, scooters, startY) => {
     // Calculate X position based on column
     const x = leftColumn ? PAGE_MARGIN : PAGE_MARGIN * 2 + columnWidth;
 
-    // Add damage report box
+    // Add damage report box with background color
     doc.setDrawColor(200, 200, 200);
-    doc.setFillColor(250, 250, 250);
+    if (damage.resolved) {
+      doc.setFillColor(245, 245, 245); // Light gray for resolved
+    } else {
+      doc.setFillColor(254, 242, 242); // Light red for active
+    }
     doc.roundedRect(x, currentY, columnWidth, textHeight, 2, 2, 'F');
     
     // Add text
@@ -134,8 +164,8 @@ const addDamageReports = (doc, scooters, startY) => {
     leftColumn = !leftColumn;
   });
 
-  // Return final Y position
-  return currentY + maxColumnHeight + 10;
+  // Return final Y position, ensuring we account for the last row
+  return currentY + (leftColumn ? 0 : maxColumnHeight) + 10;
 };
 
 /**
@@ -153,8 +183,8 @@ const addHeader = (doc, { categoryName, dateRange }) => {
   // Category and Date Range
   doc.setFontSize(12);
   doc.setFont('helvetica', 'normal');
-  doc.text(`Category: ${categoryName}`, 15, 45);
-  doc.text(`Period: ${formatDate(dateRange.startDate)} - ${formatDate(dateRange.endDate)}`, 15, 52);
+  doc.text(`Category: ${categoryName}`, PAGE_MARGIN, 45);
+  doc.text(`Period: ${formatPDFDate(dateRange.startDate)} - ${formatPDFDate(dateRange.endDate)}`, PAGE_MARGIN, 52);
 };
 
 /**
@@ -181,46 +211,62 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
     // Add header
     addHeader(doc, { categoryName, dateRange });
 
-    // Prepare table data
-    const tableData = services.map(service => [
-      formatDate(service.service_date),
-      service.scooter?.id || '',
-      formatKm(service.current_km),
-      formatKm(service.next_km),
-      service.service_details || ''
-    ]);
+    // Get damages within date range
+    const filteredDamages = getFilteredDamages(services, dateRange.startDate, dateRange.endDate);
 
-    // Add service history table
-    doc.autoTable({
-      startY: 60,
-      head: [['Date', 'Vehicle ID', 'Current KM', 'Next Service', 'Service Details']],
-      body: tableData,
-      styles: {
-        fontSize: 9,
-        cellPadding: 3,
-      },
-      headStyles: {
-        fillColor: [41, 128, 185],
-        textColor: 255,
-        fontSize: 10,
-        fontStyle: 'bold',
-        halign: 'center'
-      },
-      columnStyles: {
-        0: { cellWidth: 25 },  // Date
-        1: { cellWidth: 25 },  // Vehicle ID
-        2: { cellWidth: 25, halign: 'right' },  // Current KM
-        3: { cellWidth: 25, halign: 'right' },  // Next Service
-        4: { cellWidth: 'auto' }  // Service Details
-      },
-      margin: { top: PAGE_MARGIN, bottom: FOOTER_HEIGHT + FOOTER_PADDING },
-      didDrawPage: function(data) {
-        addFooter(doc);
-      }
+    // Prepare table data for services
+    const tableData = services.map(service => {
+      const date = new Date(service.service_date);
+      const formattedDate = `${date.getDate().toString().padStart(2, '0')}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getFullYear()}`;
+      return [
+        formattedDate,
+        service.scooter?.id || '',
+        formatKm(service.current_km),
+        formatKm(service.next_km),
+        service.time_taken || '-',
+        service.service_details || ''
+      ];
     });
 
-    // Get Y position after table
-    let currentY = doc.lastAutoTable.finalY + 15;
+    // Add service history table if there are services
+    if (tableData.length > 0) {
+      doc.autoTable({
+        startY: 60,
+        head: [['Date', 'Vehicle ID', 'Current KM', 'Next Service', 'Time Taken', 'Service Details']],
+        body: tableData,
+        styles: {
+          fontSize: 9,
+          cellPadding: 3
+        },
+        headStyles: {
+          fillColor: [41, 128, 185],
+          textColor: 255,
+          fontSize: 10,
+          fontStyle: 'bold',
+          halign: 'center'
+        },
+        columnStyles: {
+          0: { cellWidth: 25 },  // Increased width for date
+          1: { cellWidth: 20 },
+          2: { cellWidth: 20, halign: 'right' },
+          3: { cellWidth: 20, halign: 'right' },
+          4: { cellWidth: 20 },
+          5: { cellWidth: 'auto' }
+        },
+        margin: { top: PAGE_MARGIN, bottom: FOOTER_HEIGHT + FOOTER_PADDING },
+        didDrawPage: function(data) {
+          addFooter(doc);
+        }
+      });
+    } else {
+      // If no services, add a message
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.text('No service records found for this period.', PAGE_MARGIN, 65);
+    }
+
+    // Get Y position after table or message
+    let currentY = services.length > 0 ? doc.lastAutoTable.finalY + 15 : 75;
 
     // Add damage reports if there's enough space, otherwise add new page
     if (getRemainingSpace(doc) < 40) {
@@ -229,9 +275,9 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
     }
 
     // Add damage reports section
-    currentY = addDamageReports(doc, services.map(s => s.scooter).filter(Boolean), currentY);
+    currentY = addDamageReports(doc, filteredDamages, currentY);
 
-    // Add summary section
+    // Add summary section on new page if needed
     if (getRemainingSpace(doc) < 40) {
       doc.addPage();
       currentY = PAGE_MARGIN;
@@ -244,24 +290,22 @@ export const generateServiceReport = async ({ categoryName, dateRange, services 
     
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
-    doc.text(`Total Services: ${services.length}`, PAGE_MARGIN, currentY + 10);
+    doc.text(`Services Performed: ${services.length}`, PAGE_MARGIN, currentY + 10);
+    doc.text(`Damage Reports: ${filteredDamages.length}`, PAGE_MARGIN, currentY + 20);
     
     // Count active damage reports
-    const activeDamages = services.reduce((count, service) => {
-      return count + (service.scooter?.damages?.filter(d => !d.resolved)?.length || 0);
-    }, 0);
+    const activeDamages = filteredDamages.filter(d => !d.resolved).length;
+    if (filteredDamages.length > 0) {
+      doc.text(`Active Damage Reports: ${activeDamages}`, PAGE_MARGIN, currentY + 30);
+      doc.text(`Resolved Damage Reports: ${filteredDamages.length - activeDamages}`, PAGE_MARGIN, currentY + 40);
+    }
     
-    doc.text(`Active Damage Reports: ${activeDamages}`, PAGE_MARGIN, currentY + 20);
-    doc.text(`Generated on: ${new Date().toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    })}`, PAGE_MARGIN, currentY + 30);
+    const now = new Date();
+    const formattedNow = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    doc.text(`Generated on: ${formattedNow}`, PAGE_MARGIN, currentY + (filteredDamages.length > 0 ? 50 : 30));
 
     // Save PDF
-    const filename = `${categoryName}_Service_History_${formatDate(new Date())}.pdf`;
+    const filename = `${categoryName}_Service_History_${formatPDFDate(new Date())}.pdf`;
     doc.save(filename);
 
     return true;
@@ -296,6 +340,7 @@ export const testPDFGeneration = async () => {
         },
         current_km: 5000,
         next_km: 8000,
+        time_taken: '1 hour',
         service_details: 'Regular maintenance'
       }
     ]

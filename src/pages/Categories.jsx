@@ -233,7 +233,10 @@ function Categories() {
           const hasServiceOnDate = scooter.services?.some(
             service => service.service_date === selectedDateStr
           );
-          return matchesSearch && hasServiceOnDate;
+          const hasDamageOnDate = scooter.damages?.some(
+            damage => damage.created_at.split('T')[0] === selectedDateStr
+          );
+          return matchesSearch && (hasServiceOnDate || hasDamageOnDate);
         }
         
         return matchesSearch;
